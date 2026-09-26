@@ -18,6 +18,9 @@ const MAPPINGS: Array<[CredentialTargetId, CredentialConfig]> = [
   ["ttsKey", { tts: { key: "secret" } }],
   ["fishAudioKey", { tts: { fishKey: "secret" } }],
   ["openaiImageApiKey", { imageGen: { key: "secret" } }],
+  ["aiwahLlmGatewayApiKey", { aiwah: { llmGatewayApiKey: "secret" } }],
+  ["aiwahCrmApiKey", { aiwah: { crmApiKey: "secret" } }],
+  ["aiwahBrowserToken", { aiwah: { browserToken: "secret" } }],
 ];
 
 describe("credential request allowlist", () => {
@@ -42,7 +45,7 @@ describe("credential request allowlist", () => {
     expect(credentialIsConfigured({ tts: { key: "" } }, "ttsKey")).toBe(false);
     expect(credentialIsConfigured({ tts: { fishKey: "secret" } }, "fishAudioKey")).toBe(true);
     expect(credentialIsConfigured({ tts: { fishKey: "" } }, "fishAudioKey")).toBe(false);
-    expect(Object.keys(CREDENTIAL_TARGETS)).toHaveLength(6);
+    expect(Object.keys(CREDENTIAL_TARGETS)).toHaveLength(9);
   });
 
   it("supersedes open room cards only for the bot that requested them", () => {

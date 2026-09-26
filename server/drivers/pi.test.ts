@@ -684,7 +684,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(levels).toEqual(["off"]);
   });
 
-  it("scrubs provider and workspace credentials from every pi child env", async () => {
+  it("scrubs foreign credentials while admitting only the Aiwah Pi credential set", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-dump-"));
     const dump = join(dir, "dump.jsonl");
     // Plant a workspace credential on the harness process itself — the leak
@@ -698,6 +698,9 @@ describe("PiDriver turns (fake CLI)", () => {
         FAKE_PI_DUMP: dump,
         ANTHROPIC_API_KEY: "anthropic-secret-value",
         OPENAI_API_KEY: "openai-secret-value",
+        LLM_GATEWAY_API_KEY: "gateway-secret-value",
+        AIWAH_CRM_MCP_KEY: "crm-secret-value",
+        PLAYWRIGHT_AIWAH_EXTENSION_TOKEN: "browser-secret-value",
       });
       await instance.dispose();
     } finally {
@@ -719,6 +722,9 @@ describe("PiDriver turns (fake CLI)", () => {
       expect(row.envConfigured).not.toContain("OPENAI_API_KEY");
       expect(row.envConfigured).not.toContain("XAI_API_KEY");
       expect(row.envConfigured).not.toContain("BOX_TOKEN");
+      expect(row.envConfigured).toContain("LLM_GATEWAY_API_KEY");
+      expect(row.envConfigured).toContain("AIWAH_CRM_MCP_KEY");
+      expect(row.envConfigured).toContain("PLAYWRIGHT_AIWAH_EXTENSION_TOKEN");
     }
     expect(JSON.stringify(rows)).not.toContain("anthropic-secret-value");
     expect(JSON.stringify(rows)).not.toContain("openai-secret-value");

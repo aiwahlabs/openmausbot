@@ -2697,11 +2697,11 @@ let followupsReady = false;
 const sendSequencer = new SendSequencer();
 bootSelection = await defaultSelection();
 const seededBot = store.seedIfEmpty();
-if (seededBot && cfg.newBotDefaults) {
-  // The empty-workspace starter is still a newly created bot. Apply the same
-  // preferences as POST /api/bots so managed/source installations do not get
-  // one generic bot before every later bot receives their configured identity.
-  const settings = resolveBotCreationDefaults(cfg.newBotDefaults, {}).profile;
+const starterDefaults = cfg.starterBotDefaults ?? cfg.newBotDefaults;
+if (seededBot && starterDefaults) {
+  // Managed installations may give the empty-workspace starter a permanent
+  // setup/repair identity without weakening the defaults for later workers.
+  const settings = resolveBotCreationDefaults(starterDefaults, {}).profile;
   const checkedCwd = validateBotCwd(settings.cwd ?? null);
   if (!checkedCwd.ok) throw new Error(`Invalid new-bot default cwd: ${checkedCwd.error}`);
   store.patchBot(seededBot.id, newBotSettingsPatch(seededBot, settings, settings.section || undefined, checkedCwd.cwd ?? undefined));
@@ -12594,6 +12594,11 @@ function configStatus() {
     decisions: { retentionDays: decisionRetentionDays(cfg.decisions?.retentionDays) },
     // the base URL is a setting, not a secret; the key stays write-only
     openaiCompat: { configured: Boolean(cfg.openaiCompat?.key), url: cfg.openaiCompat?.url ?? "" },
+    aiwah: {
+      llmGatewayConfigured: Boolean(cfg.aiwah?.llmGatewayApiKey),
+      crmConfigured: Boolean(cfg.aiwah?.crmApiKey),
+      browserConfigured: Boolean(cfg.aiwah?.browserToken),
+    },
     composio: {
       configured: composio.configured(cfg),
       mode: composio.connectionMode(cfg),
@@ -20916,6 +20921,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (persisted.tts?.fishKey !== undefined) persisted.tts.fishKey = "";
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
+          if (persisted.aiwah?.llmGatewayApiKey !== undefined) persisted.aiwah.llmGatewayApiKey = "";
+          if (persisted.aiwah?.crmApiKey !== undefined) persisted.aiwah.crmApiKey = "";
+          if (persisted.aiwah?.browserToken !== undefined) persisted.aiwah.browserToken = "";
           saveConfig(persisted);
           configWriteCommitted = true;
           syncCredentialEnv(patch);

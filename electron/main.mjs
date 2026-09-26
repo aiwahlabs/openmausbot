@@ -2743,6 +2743,9 @@ const CREDENTIAL_PATCH = {
   fishAudioKey: (value) => ({ tts: { fishKey: value } }),
   openaiImageApiKey: (value) => ({ imageGen: { key: value } }),
   customImageApiKey: (value) => ({ imageGen: { customApiKey: value } }),
+  aiwahLlmGatewayApiKey: (value) => ({ aiwah: { llmGatewayApiKey: value } }),
+  aiwahCrmApiKey: (value) => ({ aiwah: { crmApiKey: value } }),
+  aiwahBrowserToken: (value) => ({ aiwah: { browserToken: value } }),
 };
 
 async function saveWorkspaceCredential(name, value) {

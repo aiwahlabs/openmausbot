@@ -52,7 +52,10 @@ if (process.env.FAKE_PI_DUMP) {
       process.env.FAKE_PI_DUMP,
       JSON.stringify({
         argv,
-        envConfigured: ["PATH", "HOME", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", "BOX_TOKEN"].filter(
+        envConfigured: [
+          "PATH", "HOME", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", "BOX_TOKEN",
+          "LLM_GATEWAY_API_KEY", "AIWAH_CRM_MCP_KEY", "PLAYWRIGHT_AIWAH_EXTENSION_TOKEN",
+        ].filter(
           (k) => process.env[k] !== undefined,
         ),
         mcpConfig,

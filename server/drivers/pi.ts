@@ -460,6 +460,12 @@ function piEnvironment(source: Record<string, string | undefined>): Record<strin
   // neither list.
   stripWorkspaceCredentialEnv(env);
   for (const key of PROVIDER_CREDENTIAL_ENV) delete env[key];
+  // The Aiwah profile deliberately consumes these three workspace-scoped
+  // credentials. Re-admit only this narrow set after the generic scrub; no
+  // other provider or workspace credential reaches the Pi child.
+  for (const key of ["LLM_GATEWAY_API_KEY", "AIWAH_CRM_MCP_KEY", "PLAYWRIGHT_AIWAH_EXTENSION_TOKEN"] as const) {
+    if (source[key]) env[key] = source[key];
+  }
   return env;
 }
 
