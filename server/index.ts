@@ -2704,7 +2704,12 @@ if (seededBot && starterDefaults) {
   const settings = resolveBotCreationDefaults(starterDefaults, {}).profile;
   const checkedCwd = validateBotCwd(settings.cwd ?? null);
   if (!checkedCwd.ok) throw new Error(`Invalid new-bot default cwd: ${checkedCwd.error}`);
-  store.patchBot(seededBot.id, newBotSettingsPatch(seededBot, settings, settings.section || undefined, checkedCwd.cwd ?? undefined));
+  store.patchBot(seededBot.id, {
+    ...newBotSettingsPatch(seededBot, settings, settings.section || undefined, checkedCwd.cwd ?? undefined),
+    // Unlike an ordinary creation request, seedIfEmpty has already chosen a
+    // random name. A starter-only template may deliberately replace it.
+    ...(settings.name ? { name: settings.name } : {}),
+  });
   if (settings.chiefOfStaff) {
     store.patchBot(seededBot.id, { managedSections: settings.managedSections ?? [] });
     store.setChiefOfStaff(seededBot.id);
