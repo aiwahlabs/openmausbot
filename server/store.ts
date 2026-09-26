@@ -2676,8 +2676,8 @@ export class Store {
 
   /** First-run seed: one bot so the app never opens empty — it gets a
    * random friendly name like every other bot. */
-  seedIfEmpty() {
-    if (this.bots.length) return;
-    this.createBot();
+  seedIfEmpty(): BotRecord | null {
+    if (this.bots.length) return null;
+    return this.createBot();
   }
 }

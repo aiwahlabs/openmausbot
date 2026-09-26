@@ -2672,11 +2672,44 @@ const store = new Store(
   () => bootSelection,
   (selection) => withNewBotEffort(selection, cfg.newBots?.effort, registry.get(selection.instanceId)?.adapter.capabilities.effortLevels),
 );
+type ResolvedNewBotSettings = ReturnType<typeof resolveBotCreationDefaults>["profile"];
+function newBotSettingsPatch(bot: BotRecord, settings: ResolvedNewBotSettings, section?: string, cwd?: string) {
+  const { chiefOfStaff: _chief, managedSections: _managed, ...ordinary } = settings;
+  return {
+    ...ordinary,
+    // Store creation completes workspace defaults (including effort).
+    // Applying the rest of the template must not undo that selection.
+    name: bot.name,
+    section,
+    modelSelection: bot.modelSelection,
+    mascotExpression: ordinary.mascotExpression ?? undefined,
+    avatarUrl: ordinary.avatarUrl || undefined,
+    computer: ordinary.computer ?? undefined,
+    cwd,
+    peers: ordinary.peers ?? undefined,
+    mcpServers: ordinary.mcpServers ?? undefined,
+    browserProfile: ordinary.browserProfile || undefined,
+    autoApprove: ordinary.approvalMode === "auto",
+  };
+}
 const teamComputers = new TeamComputers(join(DATA_DIR, "team-computers.json"), ENVIRONMENT_ID);
 let followupsReady = false;
 const sendSequencer = new SendSequencer();
 bootSelection = await defaultSelection();
-store.seedIfEmpty();
+const seededBot = store.seedIfEmpty();
+if (seededBot && cfg.newBotDefaults) {
+  // The empty-workspace starter is still a newly created bot. Apply the same
+  // preferences as POST /api/bots so managed/source installations do not get
+  // one generic bot before every later bot receives their configured identity.
+  const settings = resolveBotCreationDefaults(cfg.newBotDefaults, {}).profile;
+  const checkedCwd = validateBotCwd(settings.cwd ?? null);
+  if (!checkedCwd.ok) throw new Error(`Invalid new-bot default cwd: ${checkedCwd.error}`);
+  store.patchBot(seededBot.id, newBotSettingsPatch(seededBot, settings, settings.section || undefined, checkedCwd.cwd ?? undefined));
+  if (settings.chiefOfStaff) {
+    store.patchBot(seededBot.id, { managedSections: settings.managedSections ?? [] });
+    store.setChiefOfStaff(seededBot.id);
+  }
+}
 hostedModels?.reconcile(store);
 // A committed profile cleanup means both its config deletion and bot-reference
 // cleanup were intended to be durable. Reconcile stale secondary references
@@ -17496,18 +17529,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ...(created?.ok ? { visibility: created.visibility } : {}) });
       const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
       try {
-        const { chiefOfStaff: _chief, managedSections: _managed, ...ordinary } = settings;
-        store.patchBot(bot.id, {
-          // Store creation completes workspace defaults (including effort).
-          // Applying the rest of the template must not undo that selection.
-          ...ordinary, name: bot.name, section, modelSelection: bot.modelSelection,
-          mascotExpression: ordinary.mascotExpression ?? undefined,
-          avatarUrl: ordinary.avatarUrl || undefined,
-          computer: ordinary.computer ?? undefined, cwd: checkedCwd.cwd ?? undefined,
-          peers: ordinary.peers ?? undefined, mcpServers: ordinary.mcpServers ?? undefined,
-          browserProfile: ordinary.browserProfile || undefined,
-          autoApprove: ordinary.approvalMode === "auto",
-        });
+        store.patchBot(bot.id, newBotSettingsPatch(bot, settings, section, checkedCwd.cwd ?? undefined));
         // What the preset brings wins over the saved defaults for the same
         // skill name or note file.
         const presetSkills = new Set(preset?.preset.skills ?? []);

@@ -1309,13 +1309,14 @@ describe("Store", () => {
 
   it("seedIfEmpty creates exactly one starter bot, once", () => {
     const store = new Store(selection);
-    store.seedIfEmpty();
+    const seeded = store.seedIfEmpty();
+    expect(seeded?.id).toBe(store.bots[0]?.id);
     expect(store.bots).toHaveLength(1);
-    store.seedIfEmpty();
+    expect(store.seedIfEmpty()).toBeNull();
     expect(store.bots).toHaveLength(1);
 
     const reloaded = new Store(selection);
-    reloaded.seedIfEmpty();
+    expect(reloaded.seedIfEmpty()).toBeNull();
     expect(reloaded.bots).toHaveLength(1);
   });
 
