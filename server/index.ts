@@ -294,7 +294,7 @@ import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_
 import { Handoffs, handedStateUsable, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
-import { TurnResources, workspaceResource, type TurnOwner } from "./turn-resources.ts";
+import { collaborativeWorkspace, TurnResources, workspaceResource, type TurnOwner } from "./turn-resources.ts";
 import {
   ensureWorkspace,
   ensureTaskWorkspace,
@@ -8056,7 +8056,12 @@ async function startTurn(
           ? store.pinTaskCwd(bot.id, threadId, privateWorkspace)
           : null;
       const cwd = pinnedCwd ?? undefined;
-      if (cwd && !claimTurnResource(resourceOwner, workspaceResource(cwd))) {
+      // A host may explicitly designate one exact company workspace as a
+      // collaborative live filesystem. Different bots can then research and
+      // coordinate there concurrently; repository/task policy owns shared
+      // writes. Nested project folders remain exclusive and keep the normal
+      // one-writer protection.
+      if (cwd && !collaborativeWorkspace(cwd) && !claimTurnResource(resourceOwner, workspaceResource(cwd))) {
         throw Object.assign(new Error("another thread is working in this project folder — wait for it to finish or choose a separate folder"), { status: 409, code: "workspace_busy" });
       }
       // Checkpoint explicit project folders, where a bot can overwrite the

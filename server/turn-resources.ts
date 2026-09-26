@@ -61,6 +61,20 @@ export function workspaceResource(cwd: string): string {
   return `workspace:${process.platform === "win32" ? canonical.toLowerCase() : canonical}`;
 }
 
+/** One explicitly configured company workspace may be collaborative rather
+ * than an exclusive project checkout. The match is exact after resolving
+ * symlinks and native casing: selecting a repository or any other nested
+ * project still receives the ordinary one-writer lease. This is an opt-in
+ * host policy, never a path chosen by a bot. */
+export function collaborativeWorkspace(cwd: string, configuredRoot = process.env.OMB_COLLABORATIVE_WORKSPACE_ROOT): boolean {
+  if (!configuredRoot?.trim()) return false;
+  try {
+    return workspaceResource(cwd) === workspaceResource(configuredRoot.trim());
+  } catch {
+    return false;
+  }
+}
+
 function overlaps(a: string, b: string): boolean {
   if (a === b) return true;
   if (!a.startsWith("workspace:") || !b.startsWith("workspace:")) return false;
