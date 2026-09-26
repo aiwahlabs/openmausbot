@@ -82,6 +82,12 @@ import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDes
 import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
+import { applyDesktopUserDataOverride } from "./data-paths.mjs";
+
+// Apply before the first app.getPath("userData") call. This keeps Electron
+// cookies, safeStorage ciphertext, CUA state and window state beside a managed
+// harness data directory without changing the default desktop behavior.
+applyDesktopUserDataOverride(app);
 
 const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
 const nativeActions = nativeDesktopActions(process.platform);
