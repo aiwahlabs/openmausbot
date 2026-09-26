@@ -7,9 +7,9 @@
 // the pi binary itself, so this driver holds no API key and needs no sign-in.
 //
 // Conversation continuity: the first turn sends `new_session` and remembers
-// the returned `sessionFile`; later turns send `switch_session` with that
-// path (the way Claude Code resumes by session id). `sessionFile` is the
-// resumeCursor the harness persists per thread.
+// the returned `sessionFile`. A warm process retains that session directly;
+// after process recycle later turns send `switch_session` with the path.
+// `sessionFile` is the resumeCursor the harness persists per thread.
 //
 // Model ids in the picker are `provider/modelId` composites (e.g.
 // `ollama-cloud/glm-5.2`); `set_model` splits that into pi's separate
@@ -515,6 +515,31 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       child?: { stdin: { write: (s: string) => void } };
       steer?: (text: string) => Promise<SteerOutcome>;
     }>();
+    // A Pi RPC process keeps its session and MCP connections warm between
+    // turns on the same thread. Bound idle resources and recycle whenever its
+    // immutable launch context changes (especially integration credentials).
+    const idle = new Map<string, {
+      child: ReturnType<typeof spawnCli>;
+      mcpTempDir: string | null;
+      signature: string;
+      sessionFile: string | null;
+      timer: ReturnType<typeof setTimeout>;
+      onClose: () => void;
+      onError: () => void;
+    }>();
+    const closeIdle = (threadId: string) => {
+      const entry = idle.get(threadId);
+      if (!entry) return;
+      idle.delete(threadId);
+      clearTimeout(entry.timer);
+      entry.child.off("close", entry.onClose);
+      entry.child.off("error", entry.onError);
+      try { entry.child.stdin.end(); } catch { /* already closed */ }
+      try { killCliTree(entry.child); } catch { /* already gone */ }
+      if (entry.mcpTempDir) {
+        try { rmSync(entry.mcpTempDir, { recursive: true, force: true }); } catch { /* best effort */ }
+      }
+    };
 
     const emit = (event: RuntimeEvent) => {
       for (const l of Array.from(listeners)) l(event);
@@ -569,10 +594,24 @@ export const PiDriver: ProviderDriver<PiConfig> = {
 
       // integrations → stdio MCP servers for the pi-mcp-extension. The config
       // carries credentials (box token, composio key, comms token), so it goes
-      // into a 0600 temp file removed when the turn settles — never on argv.
+      // into a 0600 temp file retained only while its Pi process lives —
+      // never on argv.
       const mcpServers = buildMcpServers(turn);
+      const signature = JSON.stringify({ cwd: turn.cwd, mcpServers, model: turn.model, effort: turn.effort, approvalMode: turn.approvalMode, fullAuto });
+      const prior = idle.get(threadId);
+      const canReuse = Boolean(prior && prior.signature === signature && prior.child.exitCode === null &&
+        prior.child.signalCode === null && (!turn.resumeCursor || turn.resumeCursor === prior.sessionFile));
+      if (prior && !canReuse) closeIdle(threadId);
+      const reused = canReuse ? idle.get(threadId) : undefined;
+      if (reused) {
+        idle.delete(threadId);
+        clearTimeout(reused.timer);
+        reused.child.off("close", reused.onClose);
+        reused.child.off("error", reused.onError);
+      }
       let mcpTempDir: string | null = null;
-      if (mcpServers) {
+      if (reused) mcpTempDir = reused.mcpTempDir;
+      else if (mcpServers) {
         mcpTempDir = mkdtempSync(join(tmpdir(), "omb-pi-mcp-"));
         try {
           writeFileSync(join(mcpTempDir, "mcp.json"), JSON.stringify({ mcpServers }), { mode: 0o600 });
@@ -592,7 +631,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // spawnCli can throw synchronously (unresolvable CLI); if it does, the
       // 0600 temp file with the box token / composio key / comms token must
       // not be left on disk — settle() never runs because no child existed.
-      const child = (() => {
+      const child = reused?.child ?? (() => {
         try {
           return spawnCli(config.cli, childArgs, {
             stdio: ["pipe", "pipe", "pipe"],
@@ -614,6 +653,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           throw err;
         }
       })();
+      let sessionFile: string | null = reused?.sessionFile ?? (typeof turn.resumeCursor === "string" ? turn.resumeCursor : null);
+      let sessionReady = Boolean(reused);
       let buf = "";
       let assistantText = "";
       // set when a compaction event arrives this turn; gates the receipt
@@ -643,7 +684,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           timer.unref?.();
           responseWaiters.set(key, { resolve, reject, timer });
         });
-      child.stdin.on("error", () => rejectWaiters(new Error("pi stdin closed")));
+      const onStdinError = () => rejectWaiters(new Error("pi stdin closed"));
+      child.stdin.on("error", onStdinError);
       const send = (obj: Record<string, unknown>) => {
         appendNative(threadId, { dir: "out", source: "pi.rpc", msg: piNativeLogMessage(obj) });
         child.stdin.write(JSON.stringify(obj) + "\n");
@@ -678,21 +720,26 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
           ...(usage ? { usage: { input: usage.input ?? 0, output: usage.output ?? 0 } } : {}),
         });
-        try {
-          child.stdin.end();
-        } catch {
-          /* already closed */
-        }
-        try {
-          killCliTree(child);
-        } catch {
-          /* already gone */
-        }
-        if (mcpTempDir) {
-          try {
-            rmSync(mcpTempDir, { recursive: true, force: true });
-          } catch {
-            /* best effort */
+        child.stdout.off("data", onStdoutData);
+        child.off("error", onChildError);
+        child.off("close", onChildClose);
+        child.stdin.off("error", onStdinError);
+        rejectWaiters(new Error("pi turn completed"));
+        if (ok && stopReason !== "cancelled" && sessionReady && child.exitCode === null && child.signalCode === null) {
+          const onClose = () => closeIdle(threadId);
+          const onError = () => closeIdle(threadId);
+          const timer = setTimeout(() => closeIdle(threadId), 5 * 60_000);
+          timer.unref?.();
+          idle.set(threadId, { child, mcpTempDir, signature, sessionFile, timer, onClose, onError });
+          child.on("close", onClose);
+          child.on("error", onError);
+          // Avoid an unbounded fleet of idle Pi/MCP processes.
+          if (idle.size > 4) closeIdle(idle.keys().next().value!);
+        } else {
+          try { child.stdin.end(); } catch { /* already closed */ }
+          try { killCliTree(child); } catch { /* already gone */ }
+          if (mcpTempDir) {
+            try { rmSync(mcpTempDir, { recursive: true, force: true }); } catch { /* best effort */ }
           }
         }
         active.delete(threadId);
@@ -969,7 +1016,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       };
 
       child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
+      const onStdoutData = (chunk: string) => {
         buf += chunk;
         let nl: number;
         while ((nl = buf.indexOf("\n")) !== -1) {
@@ -982,18 +1029,21 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             /* skip non-JSON line */
           }
         }
-      });
-      child.on("error", (err) => {
+      };
+      child.stdout.on("data", onStdoutData);
+      const onChildError = (err: Error) => {
         const fail = describeSpawnFailure(err as NodeJS.ErrnoException, config.cli);
         rejectWaiters(new Error(fail.message));
         emit({ ...base(threadId, turnId), type: "runtime.error", message: fail.message, setup: fail.setup });
         settle(false);
-      });
-      child.on("close", () => {
+      };
+      child.on("error", onChildError);
+      const onChildClose = () => {
         // a clean close without a terminal event is a failed turn, never a hang
         rejectWaiters(new Error("pi process exited before replying"));
         settle(false);
-      });
+      };
+      child.on("close", onChildClose);
 
       emit({ ...base(threadId, turnId), type: "turn.started" });
 
@@ -1002,9 +1052,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // hands it back next turn, so that id IS the resume handle — pi's
       // sessionFile, which switch_session expects as `sessionPath`.
       const sessionPath = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
-      let sessionFile = sessionPath;
-      let sessionReady = false;
       try {
+        if (reused) {
+          emit({ ...base(threadId, turnId), type: "session.started", sessionId: sessionFile, model: turn.model ?? null });
+        } else {
         const command = sessionPath ? "switch_session" : "new_session";
         const hsPromise = awaitResponse(command);
         send(sessionPath ? { type: "switch_session", sessionPath } : { type: "new_session" });
@@ -1017,6 +1068,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           sessionId: sessionFile ?? hs?.sessionId ?? null,
           model: turn.model ?? null,
         });
+        }
       } catch {
         // without a session we can still try a bare prompt; pi --no-session
         // accepts a prompt without an explicit session.
@@ -1055,7 +1107,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // compaction events and drops the receipt the moment one arrives,
       // and re-anchors the full prompt every PI_PROMPT_RE_ANCHOR_TURNS
       // bare turns as a backstop for anything the events miss. Receipts
-      // are durable because the session file outlives both the per-turn
+      // are durable because the session file outlives both the warm
       // child and this process. Without a session the prompt is the
       // model's only context, so that turn keeps the full block and writes
       // no receipt.
@@ -1218,6 +1270,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         hasSession: (threadId) => active.has(threadId),
         stopAll: async () => {
           for (const { stop } of active.values()) stop();
+          for (const threadId of Array.from(idle.keys())) closeIdle(threadId);
         },
         onEvent: (listener) => {
           listeners.add(listener);
@@ -1226,6 +1279,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       },
       dispose: async () => {
         for (const { stop } of active.values()) stop();
+        for (const threadId of Array.from(idle.keys())) closeIdle(threadId);
         listeners.clear();
       },
     };

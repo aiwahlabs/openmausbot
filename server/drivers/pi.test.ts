@@ -330,6 +330,29 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(secondSession?.sessionId).toBe(firstSession?.sessionId);
   });
 
+  it("reuses the Pi process for a stable thread and recycles it when the model changes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-warm-"));
+    const dump = join(dir, "launches.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    writeFileSync(dump, ""); // exclude the startup catalog probe
+    const threadId = `t-warm-${randomUUID()}`;
+    const launchCount = () => readFileSync(dump, "utf8").split("\n").filter(Boolean)
+      .map((line) => JSON.parse(line) as { argv?: string[] })
+      .filter((row) => row.argv?.includes("rpc")).length;
+
+    const first = await instance.adapter.sendTurn({ threadId, text: "first", model: "openai/gpt-4o" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    expect(launchCount()).toBe(1);
+
+    const second = await instance.adapter.sendTurn({ threadId, text: "second", model: "openai/gpt-4o" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+    expect(launchCount()).toBe(1);
+
+    const third = await instance.adapter.sendTurn({ threadId, text: "third", model: "ollama-cloud/glm-5.2" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === third.turnId);
+    expect(launchCount()).toBe(2);
+  });
+
   it("delivers the full prompt once per session and rides volatile changes as notes", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-split-"));
     const dump = join(dir, "dump.jsonl");
