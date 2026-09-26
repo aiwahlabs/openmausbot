@@ -353,6 +353,45 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(launchCount()).toBe(2);
   });
 
+  it("does not retain a proxy with a turn-scoped harness capability", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-capability-"));
+    const dump = join(dir, "launches.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    writeFileSync(dump, "");
+    const threadId = `t-capability-${randomUUID()}`;
+    const input = {
+      threadId,
+      text: "hi",
+      integrations: { agents: { command: "node", args: ["agents-proxy.js"], env: { OMB_COMMS_TOKEN: "turn-token" } } },
+    };
+    const first = await instance.adapter.sendTurn(input);
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    const second = await instance.adapter.sendTurn(input);
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+    const launches = readFileSync(dump, "utf8").split("\n").filter(Boolean)
+      .map((line) => JSON.parse(line) as { argv?: string[] })
+      .filter((row) => row.argv?.includes("rpc"));
+    expect(launches).toHaveLength(2);
+  });
+
+  it("starts a new Pi session when the harness resets the thread", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-reset-"));
+    const dump = join(dir, "launches.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    writeFileSync(dump, "");
+    const threadId = `t-reset-${randomUUID()}`;
+    const first = await instance.adapter.sendTurn({ threadId, text: "first" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    const session = recorder.events.find((event) => event.type === "session.started" && event.turnId === first.turnId) as
+      | { sessionId: string } | undefined;
+    const second = await instance.adapter.sendTurn({ threadId, text: "fresh", resumeCursor: session?.sessionId, sessionReset: true });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+    const launches = readFileSync(dump, "utf8").split("\n").filter(Boolean)
+      .map((line) => JSON.parse(line) as { argv?: string[] })
+      .filter((row) => row.argv?.includes("rpc"));
+    expect(launches).toHaveLength(2);
+  });
+
   it("delivers the full prompt once per session and rides volatile changes as notes", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-split-"));
     const dump = join(dir, "dump.jsonl");

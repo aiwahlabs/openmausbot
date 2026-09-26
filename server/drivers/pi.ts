@@ -597,9 +597,17 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // into a 0600 temp file retained only while its Pi process lives —
       // never on argv.
       const mcpServers = buildMcpServers(turn);
-      const signature = JSON.stringify({ cwd: turn.cwd, mcpServers, model: turn.model, effort: turn.effort, approvalMode: turn.approvalMode, fullAuto });
+      // The harness revokes these capability tokens when a turn settles and
+      // mints new ones on the next turn. Their MCP proxies cannot be kept
+      // alive safely until they support credential rotation in place.
+      const rotatingCapability = Boolean(
+        turn.integrations?.agents?.env.OMB_COMMS_TOKEN ||
+        turn.integrations?.phone?.env.OMB_PHONE_TOKEN ||
+        turn.integrations?.composio?.env.OMB_CONNECTOR_TOKEN,
+      );
+      const signature = JSON.stringify({ botId: turn.botId, cwd: turn.cwd, mcpServers, model: turn.model, effort: turn.effort, approvalMode: turn.approvalMode, fullAuto });
       const prior = idle.get(threadId);
-      const canReuse = Boolean(prior && prior.signature === signature && prior.child.exitCode === null &&
+      const canReuse = Boolean(!turn.sessionReset && prior && prior.signature === signature && prior.child.exitCode === null &&
         prior.child.signalCode === null && (!turn.resumeCursor || turn.resumeCursor === prior.sessionFile));
       if (prior && !canReuse) closeIdle(threadId);
       const reused = canReuse ? idle.get(threadId) : undefined;
@@ -653,7 +661,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           throw err;
         }
       })();
-      let sessionFile: string | null = reused?.sessionFile ?? (typeof turn.resumeCursor === "string" ? turn.resumeCursor : null);
+      let sessionFile: string | null = reused?.sessionFile ?? (!turn.sessionReset && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null);
       let sessionReady = Boolean(reused);
       let buf = "";
       let assistantText = "";
@@ -725,7 +733,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         child.off("close", onChildClose);
         child.stdin.off("error", onStdinError);
         rejectWaiters(new Error("pi turn completed"));
-        if (ok && stopReason !== "cancelled" && sessionReady && child.exitCode === null && child.signalCode === null) {
+        if (ok && stopReason !== "cancelled" && !rotatingCapability && sessionReady && child.exitCode === null && child.signalCode === null) {
           const onClose = () => closeIdle(threadId);
           const onError = () => closeIdle(threadId);
           const timer = setTimeout(() => closeIdle(threadId), 5 * 60_000);
@@ -1051,7 +1059,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // harness persists session.started.sessionId as the resumeCursor and
       // hands it back next turn, so that id IS the resume handle — pi's
       // sessionFile, which switch_session expects as `sessionPath`.
-      const sessionPath = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+      const sessionPath = !turn.sessionReset && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
       try {
         if (reused) {
           emit({ ...base(threadId, turnId), type: "session.started", sessionId: sessionFile, model: turn.model ?? null });
