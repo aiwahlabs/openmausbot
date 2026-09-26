@@ -407,18 +407,52 @@ export interface PiConfig {
    * this mode — the same knob as Claude's `bypassPermissions` and the ACP
    * engines' `fullAuto`. */
   fullAuto: boolean;
+  /** Organization-managed Pi provider. The token arrives only in the child
+   * environment; this URL and model allowlist are non-secret. */
+  managed?: { url: string; models: string[] };
 }
 
 function decodeConfig(raw: unknown): PiConfig {
   if (raw === null || raw === undefined) return { cli: "pi", fullAuto: false };
   if (typeof raw !== "object") throw new Error("pi config must be an object");
-  const obj = raw as { cli?: unknown; fullAuto?: unknown };
+  const obj = raw as { cli?: unknown; fullAuto?: unknown; managed?: unknown };
   if (obj.cli !== undefined && typeof obj.cli !== "string") throw new Error("pi config `cli` must be a string");
   if (obj.fullAuto !== undefined && typeof obj.fullAuto !== "boolean") throw new Error("pi config `fullAuto` must be a boolean");
+  let managed: PiConfig["managed"];
+  if (obj.managed !== undefined) {
+    if (!obj.managed || typeof obj.managed !== "object" || Array.isArray(obj.managed)) throw new Error("pi managed config must be an object");
+    const value = obj.managed as { url?: unknown; models?: unknown };
+    if (typeof value.url !== "string" || !Array.isArray(value.models) || value.models.length < 1 || value.models.length > 500 ||
+        !value.models.every(model => typeof model === "string" && /^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,199}$/.test(model) && !model.includes("::"))) {
+      throw new Error("pi managed config is invalid");
+    }
+    const url = new URL(value.url);
+    if (url.username || url.password || url.search || url.hash ||
+        !(url.protocol === "https:" || (url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)))) {
+      throw new Error("pi managed URL must use HTTPS or loopback");
+    }
+    managed = { url: url.toString().replace(/\/$/, ""), models: [...new Set(value.models as string[])] };
+  }
   return {
     cli: obj.cli && obj.cli.trim() ? obj.cli.trim() : "pi",
     fullAuto: obj.fullAuto === true,
+    ...(managed ? { managed } : {}),
   };
+}
+
+function writeManagedPiProfile(config: NonNullable<PiConfig["managed"]>, env: Record<string, string | undefined>): void {
+  const directory = piAgentDir(env);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const modelRows = config.models.map(id => ({
+    id, name: `${id} (Company)`, reasoning: true, input: ["text", "image"],
+    contextWindow: id.startsWith("gpt-6-") ? 1_050_000 : id.startsWith("grok-") ? 500_000 : 272_000,
+    maxTokens: id.startsWith("grok-") ? 500_000 : 128_000,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  }));
+  writeFileSync(join(directory, "models.json"), `${JSON.stringify({ providers: { aiwah: {
+    baseUrl: config.url, api: "openai-completions", apiKey: "$LLM_GATEWAY_API_KEY", authHeader: true, models: modelRows,
+  } } }, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(join(directory, "settings.json"), `${JSON.stringify({ defaultProvider: "aiwah", defaultModel: config.models[0] }, null, 2)}\n`, { mode: 0o600 });
 }
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
@@ -488,6 +522,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
   async create(input: DriverCreateInput<PiConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
     const catalogEnv = piEnvironment({ ...process.env, ...input.environment });
+    if (config.managed) writeManagedPiProfile(config.managed, catalogEnv);
     let models = EMPTY;
     const readModels = async () => {
       let base = models;

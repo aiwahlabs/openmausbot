@@ -11,7 +11,7 @@ const connectionSchema = z.object({
   portalOrigin: z.string().max(2048), organizationId: uuid, organizationName: z.string().trim().min(1).max(100),
   email: z.string().email().max(320), deviceId: uuid, token: z.string().regex(/^omg_[A-Za-z0-9_-]{43}$/),
   expiresAt: z.number().finite().int().positive(),
-  providers: z.array(z.object({ id: z.enum(["anthropic", "openai", "openrouter"]), configured: z.boolean(), models: z.array(model).max(500) }).strict()).max(3),
+  providers: z.array(z.object({ id: z.enum(["anthropic", "openai", "openrouter", "pi"]), configured: z.boolean(), models: z.array(model).max(500) }).strict()).max(3),
   /** The Admin is up but its operator licence lapsed: keep the instances
    * listed as unavailable instead of treating it as a revocation. */
   suspended: z.literal("license-expired").optional(),
@@ -21,7 +21,7 @@ export type ManagedDesktopConnection = z.infer<typeof connectionSchema>;
  * cleared or when it has already expired, so references to its old
  * device-scoped ids still move to the stable ids. */
 const identitySchema = z.object({ portalOrigin: z.string().max(2048), organizationId: uuid, email: z.string().email().max(320), deviceId: uuid }).strict();
-const PROVIDER_IDS = ["anthropic", "openai", "openrouter"] as const;
+const PROVIDER_IDS = ["anthropic", "openai", "openrouter", "pi"] as const;
 export interface ManagedDesktopInfo { organizationId: string; organizationName: string }
 interface ManagedDesktopOptions {
   registry: ProviderRegistry; dataDirectory: string; now?: () => number;
@@ -75,7 +75,7 @@ export function companyInstanceConfigs(connection: ManagedDesktopConnection, run
   for (const provider of connection.providers) {
     if (!provider.configured || !provider.models.length) continue;
     const id = companyInstanceId(connection, provider.id), base = `${connection.portalOrigin}/api/desktop/gateway/${provider.id}`;
-    const displayName = `Company · ${connection.organizationName} · ${provider.id === "anthropic" ? "Claude" : provider.id === "openai" ? "Codex" : "OpenRouter"}`;
+    const displayName = `Company · ${connection.organizationName} · ${provider.id === "anthropic" ? "Claude" : provider.id === "openai" ? "Codex" : provider.id === "pi" ? "Aiwah Pi" : "OpenRouter"}`;
     if (provider.id === "anthropic") entries[id] = {
       driver: "claudeAgent", displayName,
       config: { configDir: join(runtimeDirectory, id, "claude"), managed: true },
@@ -88,6 +88,10 @@ export function companyInstanceConfigs(connection: ManagedDesktopConnection, run
     if (provider.id === "openrouter") entries[id] = {
       driver: "openai-compat", displayName, config: { url: `${base}/v1`, apiKeyEnv: "OPENMAUSBOT_COMPANY_API_KEY", model: provider.models[0], provider: "" },
       environment: { OPENMAUSBOT_COMPANY_API_KEY: connection.token },
+    };
+    if (provider.id === "pi") entries[id] = {
+      driver: "piAgent", displayName, config: { fullAuto: true, managed: { url: `${base}/v1`, models: provider.models } },
+      environment: { HOME: join(runtimeDirectory, id, "pi"), LLM_GATEWAY_API_KEY: connection.token },
     };
   }
   return entries;
@@ -147,8 +151,8 @@ export class ManagedDesktopProviders {
       const configs = companyInstanceConfigs(connection, directory);
       for (const [id, entry] of Object.entries(configs)) {
         if (this.options.registry.entries().some(existing => existing.instanceId === id)) throw new Error("Company instance conflicts with an existing account.");
-        if (entry.driver === "claudeAgent" || entry.driver === "codex") {
-          this.ensureDirectory(["providers", "company", id, entry.driver === "claudeAgent" ? "claude" : "codex"]);
+        if (entry.driver === "claudeAgent" || entry.driver === "codex" || entry.driver === "piAgent") {
+          this.ensureDirectory(["providers", "company", id, entry.driver === "claudeAgent" ? "claude" : entry.driver === "codex" ? "codex" : "pi"]);
         }
         this.ids.add(id); this.known.add(id);
       }

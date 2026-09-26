@@ -130,12 +130,15 @@ describe("PiDriver config + install", () => {
     expect(PiDriver.decodeConfig(undefined)).toEqual({ cli: "pi", fullAuto: false });
     expect(PiDriver.decodeConfig(null)).toEqual({ cli: "pi", fullAuto: false });
     expect(PiDriver.decodeConfig({ cli: "  " })).toEqual({ cli: "pi", fullAuto: false });
+    expect(PiDriver.decodeConfig({ fullAuto: true, managed: { url: "https://hq.example.test/api/desktop/gateway/pi/v1", models: ["gpt-6-luna"] } }))
+      .toEqual({ cli: "pi", fullAuto: true, managed: { url: "https://hq.example.test/api/desktop/gateway/pi/v1", models: ["gpt-6-luna"] } });
   });
 
   it("rejects invalid config (throws → shadow snapshot)", () => {
     expect(() => PiDriver.decodeConfig(5)).toThrow(/object/);
     expect(() => PiDriver.decodeConfig({ cli: 5 })).toThrow(/string/);
     expect(() => PiDriver.decodeConfig({ fullAuto: "yes" })).toThrow(/boolean/);
+    expect(() => PiDriver.decodeConfig({ managed: { url: "http://hq.example.test", models: ["gpt-6-luna"] } })).toThrow(/HTTPS/);
   });
 
   it("publishes the npm installer on every platform and points docs at pi.dev", () => {

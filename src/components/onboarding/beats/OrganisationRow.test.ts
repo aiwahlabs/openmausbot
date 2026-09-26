@@ -128,7 +128,7 @@ describe("organisation sign-in row in the welcome flow", () => {
     signIn.props.onClick!();
     signIn.props.onClick!();
     await flush();
-    expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.openmausbot.com" });
+    expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://hq.aiwahconnect.com" });
 
     let html = render().html;
     expect(html).toContain("Finish in your browser");

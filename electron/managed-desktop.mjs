@@ -7,7 +7,7 @@ import { libraryCapability, libraryRouteLimits, parseLibraryPointer } from "./or
 
 const TOKEN = /^omd_[A-Za-z0-9_-]{43}$/;
 const UUID = /^[a-f0-9-]{36}$/;
-const PROVIDERS = new Set(["anthropic", "openai", "openrouter"]);
+const PROVIDERS = new Set(["anthropic", "openai", "openrouter", "pi"]);
 const ENGINE = /^[A-Za-z][A-Za-z0-9-]{0,63}$/;
 const APP_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/;
 const COMPUTERS = ["thisComputer", "localVm", "box", "vps"];

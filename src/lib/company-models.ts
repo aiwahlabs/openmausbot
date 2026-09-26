@@ -4,7 +4,7 @@
 import { currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
 
-export type CompanyProviderId = "anthropic" | "openai" | "openrouter";
+export type CompanyProviderId = "anthropic" | "openai" | "openrouter" | "pi";
 
 /** A Company instance is owned by the enrolled desktop parent: read-only and
  * labelled with its organisation. Hosted instances are read-only but carry
