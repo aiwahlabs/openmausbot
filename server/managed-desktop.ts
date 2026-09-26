@@ -90,7 +90,7 @@ export function companyInstanceConfigs(connection: ManagedDesktopConnection, run
       environment: { OPENMAUSBOT_COMPANY_API_KEY: connection.token },
     };
     if (provider.id === "pi") entries[id] = {
-      driver: "piAgent", displayName, config: { fullAuto: true, managed: { url: `${base}/v1`, models: provider.models } },
+      driver: "piAgent", displayName, config: { fullAuto: true, managed: { url: `${base}/v1`, mcpUrl: `${connection.portalOrigin}/api/desktop/mcp`, models: provider.models } },
       environment: { HOME: join(runtimeDirectory, id, "pi"), LLM_GATEWAY_API_KEY: connection.token },
     };
   }

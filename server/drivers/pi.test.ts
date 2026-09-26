@@ -83,6 +83,15 @@ describe("buildMcpServers", () => {
     expect(buildMcpServers({ threadId: "t", text: "hi" })).toBeNull();
   });
 
+  it("mounts the device-scoped HQ CRM for a managed Pi instance", () => {
+    const servers = buildMcpServers({ threadId: "t", text: "hi" }, { url: "https://hq.example.test/api/desktop/mcp", token: "device-scoped" });
+    expect(servers?.["aiwah-crm"]).toEqual({
+      command: process.execPath,
+      args: [expect.stringMatching(/http-mcp-proxy\.(?:ts|js)$/)],
+      env: { OMB_REMOTE_MCP_URL: "https://hq.example.test/api/desktop/mcp", OMB_REMOTE_MCP_TOKEN: "device-scoped" },
+    });
+  });
+
   it("passes composio/agents/phone through as stdio servers", () => {
     const servers = buildMcpServers({
       threadId: "t",
@@ -130,15 +139,15 @@ describe("PiDriver config + install", () => {
     expect(PiDriver.decodeConfig(undefined)).toEqual({ cli: "pi", fullAuto: false });
     expect(PiDriver.decodeConfig(null)).toEqual({ cli: "pi", fullAuto: false });
     expect(PiDriver.decodeConfig({ cli: "  " })).toEqual({ cli: "pi", fullAuto: false });
-    expect(PiDriver.decodeConfig({ fullAuto: true, managed: { url: "https://hq.example.test/api/desktop/gateway/pi/v1", models: ["gpt-6-luna"] } }))
-      .toEqual({ cli: "pi", fullAuto: true, managed: { url: "https://hq.example.test/api/desktop/gateway/pi/v1", models: ["gpt-6-luna"] } });
+    expect(PiDriver.decodeConfig({ fullAuto: true, managed: { url: "https://hq.example.test/api/desktop/gateway/pi/v1", mcpUrl: "https://hq.example.test/api/desktop/mcp", models: ["gpt-6-luna"] } }))
+      .toEqual({ cli: "pi", fullAuto: true, managed: { url: "https://hq.example.test/api/desktop/gateway/pi/v1", mcpUrl: "https://hq.example.test/api/desktop/mcp", models: ["gpt-6-luna"] } });
   });
 
   it("rejects invalid config (throws → shadow snapshot)", () => {
     expect(() => PiDriver.decodeConfig(5)).toThrow(/object/);
     expect(() => PiDriver.decodeConfig({ cli: 5 })).toThrow(/string/);
     expect(() => PiDriver.decodeConfig({ fullAuto: "yes" })).toThrow(/boolean/);
-    expect(() => PiDriver.decodeConfig({ managed: { url: "http://hq.example.test", models: ["gpt-6-luna"] } })).toThrow(/HTTPS/);
+    expect(() => PiDriver.decodeConfig({ managed: { url: "http://hq.example.test", mcpUrl: "http://hq.example.test/api/desktop/mcp", models: ["gpt-6-luna"] } })).toThrow(/HTTPS/);
   });
 
   it("publishes the npm installer on every platform and points docs at pi.dev", () => {

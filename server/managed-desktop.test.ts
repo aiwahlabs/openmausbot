@@ -72,7 +72,7 @@ it("routes an Aiwah managed Pi instance through its device-scoped HQ gateway", (
   const runtime = "/fixture/company-runtime", id = companyInstanceId(value, "pi");
   const pi = companyInstanceConfigs(value, runtime)[id];
   expect(pi.driver).toBe("piAgent");
-  expect(pi.config).toEqual({ fullAuto: true, managed: { url: `${value.portalOrigin}/api/desktop/gateway/pi/v1`, models: ["gpt-6-luna", "grok-4.7"] } });
+  expect(pi.config).toEqual({ fullAuto: true, managed: { url: `${value.portalOrigin}/api/desktop/gateway/pi/v1`, mcpUrl: `${value.portalOrigin}/api/desktop/mcp`, models: ["gpt-6-luna", "grok-4.7"] } });
   expect(pi.environment).toEqual({ HOME: join(runtime, id, "pi"), LLM_GATEWAY_API_KEY: value.token });
 });
 

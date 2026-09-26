@@ -123,7 +123,7 @@ export function piThinkingLevel(effort: EffortLevel): (typeof EFFORT_LEVELS)[num
 /** Mirror of the Claude driver's integration → stdio MCP mount: every entry is
  * a JSON-RPC 2.0 stdio server the pi-mcp-extension consumes. Returns null when
  * there is nothing to mount (the common case). */
-export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | null {
+export function buildMcpServers(turn: SendTurnInput, managed?: { url: string; token: string }): Record<string, unknown> | null {
   const servers: Record<string, unknown> = {};
   if (turn.integrations?.composio) servers.composio = { ...turn.integrations.composio };
   if (turn.integrations?.localComputer) {
@@ -146,6 +146,11 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
       env: { ...NODE_ENV_FLAG, DWEB_URL: turn.integrations.dweb.url },
     };
   }
+  if (managed) servers["aiwah-crm"] = {
+    command: process.execPath,
+    args: [SPAWNED_PROXIES.remoteMcp],
+    env: { OMB_REMOTE_MCP_URL: managed.url, OMB_REMOTE_MCP_TOKEN: managed.token },
+  };
   return Object.keys(servers).length ? servers : null;
 }
 
@@ -409,7 +414,7 @@ export interface PiConfig {
   fullAuto: boolean;
   /** Organization-managed Pi provider. The token arrives only in the child
    * environment; this URL and model allowlist are non-secret. */
-  managed?: { url: string; models: string[] };
+  managed?: { url: string; mcpUrl: string; models: string[] };
 }
 
 function decodeConfig(raw: unknown): PiConfig {
@@ -421,17 +426,21 @@ function decodeConfig(raw: unknown): PiConfig {
   let managed: PiConfig["managed"];
   if (obj.managed !== undefined) {
     if (!obj.managed || typeof obj.managed !== "object" || Array.isArray(obj.managed)) throw new Error("pi managed config must be an object");
-    const value = obj.managed as { url?: unknown; models?: unknown };
-    if (typeof value.url !== "string" || !Array.isArray(value.models) || value.models.length < 1 || value.models.length > 500 ||
+    const value = obj.managed as { url?: unknown; mcpUrl?: unknown; models?: unknown };
+    if (typeof value.url !== "string" || typeof value.mcpUrl !== "string" || !Array.isArray(value.models) || value.models.length < 1 || value.models.length > 500 ||
         !value.models.every(model => typeof model === "string" && /^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,199}$/.test(model) && !model.includes("::"))) {
       throw new Error("pi managed config is invalid");
     }
     const url = new URL(value.url);
+    const mcpUrl = new URL(value.mcpUrl);
     if (url.username || url.password || url.search || url.hash ||
         !(url.protocol === "https:" || (url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)))) {
       throw new Error("pi managed URL must use HTTPS or loopback");
     }
-    managed = { url: url.toString().replace(/\/$/, ""), models: [...new Set(value.models as string[])] };
+    if (mcpUrl.origin !== url.origin || mcpUrl.username || mcpUrl.password || mcpUrl.search || mcpUrl.hash || mcpUrl.pathname !== "/api/desktop/mcp") {
+      throw new Error("pi managed MCP URL must use the same organization portal");
+    }
+    managed = { url: url.toString().replace(/\/$/, ""), mcpUrl: mcpUrl.toString(), models: [...new Set(value.models as string[])] };
   }
   return {
     cli: obj.cli && obj.cli.trim() ? obj.cli.trim() : "pi",
@@ -637,7 +646,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // carries credentials (box token, composio key, comms token), so it goes
       // into a 0600 temp file retained only while its Pi process lives —
       // never on argv.
-      const mcpServers = buildMcpServers(turn);
+      const mcpServers = buildMcpServers(turn, config.managed && catalogEnv.LLM_GATEWAY_API_KEY
+        ? { url: config.managed.mcpUrl, token: catalogEnv.LLM_GATEWAY_API_KEY }
+        : undefined);
       // The harness revokes these capability tokens when a turn settles and
       // mints new ones on the next turn. Their MCP proxies cannot be kept
       // alive safely until they support credential rotation in place.
