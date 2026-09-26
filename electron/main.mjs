@@ -2746,6 +2746,8 @@ const CREDENTIAL_PATCH = {
   aiwahLlmGatewayApiKey: (value) => ({ aiwah: { llmGatewayApiKey: value } }),
   aiwahCrmApiKey: (value) => ({ aiwah: { crmApiKey: value } }),
   aiwahBrowserToken: (value) => ({ aiwah: { browserToken: value } }),
+  aiwahSlackClientId: (value) => ({ aiwah: { slackClientId: value } }),
+  aiwahSlackClientSecret: (value) => ({ aiwah: { slackClientSecret: value } }),
 };
 
 async function saveWorkspaceCredential(name, value) {

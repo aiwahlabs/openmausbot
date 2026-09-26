@@ -407,6 +407,8 @@ const appConfigSchema = z.object({
     llmGatewayApiKey: optionalText,
     crmApiKey: optionalText,
     browserToken: optionalText,
+    slackClientId: optionalText,
+    slackClientSecret: optionalText,
   }).optional(),
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
@@ -512,7 +514,7 @@ export interface AppConfig {
   decisions?: { retentionDays?: number };
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
-  aiwah?: { llmGatewayApiKey?: string; crmApiKey?: string; browserToken?: string };
+  aiwah?: { llmGatewayApiKey?: string; crmApiKey?: string; browserToken?: string; slackClientId?: string; slackClientSecret?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   box?: { token?: string };
   /** A named host from the user's SSH config. Authentication stays with SSH. */
@@ -890,6 +892,8 @@ export function loadConfig(): AppConfig {
   if (process.env.LLM_GATEWAY_API_KEY !== undefined) cfg.aiwah.llmGatewayApiKey = process.env.LLM_GATEWAY_API_KEY;
   if (process.env.AIWAH_CRM_MCP_KEY !== undefined) cfg.aiwah.crmApiKey = process.env.AIWAH_CRM_MCP_KEY;
   if (process.env.PLAYWRIGHT_AIWAH_EXTENSION_TOKEN !== undefined) cfg.aiwah.browserToken = process.env.PLAYWRIGHT_AIWAH_EXTENSION_TOKEN;
+  if (process.env.SLACK_CLIENT_ID !== undefined) cfg.aiwah.slackClientId = process.env.SLACK_CLIENT_ID;
+  if (process.env.SLACK_CLIENT_SECRET !== undefined) cfg.aiwah.slackClientSecret = process.env.SLACK_CLIENT_SECRET;
   // The sign-in allow-list: env is how a headless box or a container is
   // bootstrapped before anyone can reach Settings.
   const splitEmails = (value: string) => value.split(/[,\s]+/).map((entry) => entry.trim().toLowerCase()).filter(Boolean);
@@ -924,6 +928,8 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.aiwah?.llmGatewayApiKey, "LLM_GATEWAY_API_KEY"],
     [patch.aiwah?.crmApiKey, "AIWAH_CRM_MCP_KEY"],
     [patch.aiwah?.browserToken, "PLAYWRIGHT_AIWAH_EXTENSION_TOKEN"],
+    [patch.aiwah?.slackClientId, "SLACK_CLIENT_ID"],
+    [patch.aiwah?.slackClientSecret, "SLACK_CLIENT_SECRET"],
   ];
   for (const [value, name] of secrets) {
     if (value === undefined) continue;
@@ -968,6 +974,8 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "LLM_GATEWAY_API_KEY",
   "AIWAH_CRM_MCP_KEY",
   "PLAYWRIGHT_AIWAH_EXTENSION_TOKEN",
+  "SLACK_CLIENT_ID",
+  "SLACK_CLIENT_SECRET",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   // Harness-private filesystem hints are not credentials themselves, but

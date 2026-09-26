@@ -58,6 +58,18 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "Paste the token supplied by your Aiwah workspace owner",
     helpUrl: "https://github.com/aiwahlabs/aiwah-workspace",
   },
+  aiwahSlackClientId: {
+    label: "Aiwah Slack OAuth Client ID",
+    description: "Identifies the company Slack app used for personal teammate authorization.",
+    placeholder: "Paste the Client ID supplied by your Aiwah workspace owner",
+    helpUrl: "https://github.com/aiwahlabs/aiwah-workspace",
+  },
+  aiwahSlackClientSecret: {
+    label: "Aiwah Slack OAuth Client Secret",
+    description: "Lets the local setup flow exchange your one-time Slack authorization code.",
+    placeholder: "Paste the Client Secret supplied by your Aiwah workspace owner",
+    helpUrl: "https://github.com/aiwahlabs/aiwah-workspace",
+  },
 } as const;
 
 export type CredentialTargetId = keyof typeof CREDENTIAL_TARGETS;
@@ -67,7 +79,7 @@ export type CredentialConfig = {
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; fishKey?: string };
   imageGen?: { key?: string };
-  aiwah?: { llmGatewayApiKey?: string; crmApiKey?: string; browserToken?: string };
+  aiwah?: { llmGatewayApiKey?: string; crmApiKey?: string; browserToken?: string; slackClientId?: string; slackClientSecret?: string };
 };
 
 export function isCredentialTargetId(value: unknown): value is CredentialTargetId {
@@ -94,6 +106,10 @@ export function credentialConfigPatch(id: CredentialTargetId, value: string): Cr
       return { aiwah: { crmApiKey: value } };
     case "aiwahBrowserToken":
       return { aiwah: { browserToken: value } };
+    case "aiwahSlackClientId":
+      return { aiwah: { slackClientId: value } };
+    case "aiwahSlackClientSecret":
+      return { aiwah: { slackClientSecret: value } };
   }
 }
 
@@ -117,6 +133,10 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.aiwah?.crmApiKey);
     case "aiwahBrowserToken":
       return Boolean(config.aiwah?.browserToken);
+    case "aiwahSlackClientId":
+      return Boolean(config.aiwah?.slackClientId);
+    case "aiwahSlackClientSecret":
+      return Boolean(config.aiwah?.slackClientSecret);
   }
 }
 

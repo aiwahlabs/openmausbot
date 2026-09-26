@@ -55,6 +55,7 @@ if (process.env.FAKE_PI_DUMP) {
         envConfigured: [
           "PATH", "HOME", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", "BOX_TOKEN",
           "LLM_GATEWAY_API_KEY", "AIWAH_CRM_MCP_KEY", "PLAYWRIGHT_AIWAH_EXTENSION_TOKEN",
+          "SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET",
         ].filter(
           (k) => process.env[k] !== undefined,
         ),

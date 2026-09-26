@@ -21,6 +21,8 @@ const MAPPINGS: Array<[CredentialTargetId, CredentialConfig]> = [
   ["aiwahLlmGatewayApiKey", { aiwah: { llmGatewayApiKey: "secret" } }],
   ["aiwahCrmApiKey", { aiwah: { crmApiKey: "secret" } }],
   ["aiwahBrowserToken", { aiwah: { browserToken: "secret" } }],
+  ["aiwahSlackClientId", { aiwah: { slackClientId: "secret" } }],
+  ["aiwahSlackClientSecret", { aiwah: { slackClientSecret: "secret" } }],
 ];
 
 describe("credential request allowlist", () => {
@@ -45,7 +47,7 @@ describe("credential request allowlist", () => {
     expect(credentialIsConfigured({ tts: { key: "" } }, "ttsKey")).toBe(false);
     expect(credentialIsConfigured({ tts: { fishKey: "secret" } }, "fishAudioKey")).toBe(true);
     expect(credentialIsConfigured({ tts: { fishKey: "" } }, "fishAudioKey")).toBe(false);
-    expect(Object.keys(CREDENTIAL_TARGETS)).toHaveLength(9);
+    expect(Object.keys(CREDENTIAL_TARGETS)).toHaveLength(11);
   });
 
   it("supersedes open room cards only for the bot that requested them", () => {

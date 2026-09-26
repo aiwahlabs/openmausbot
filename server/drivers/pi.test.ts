@@ -701,6 +701,8 @@ describe("PiDriver turns (fake CLI)", () => {
         LLM_GATEWAY_API_KEY: "gateway-secret-value",
         AIWAH_CRM_MCP_KEY: "crm-secret-value",
         PLAYWRIGHT_AIWAH_EXTENSION_TOKEN: "browser-secret-value",
+        SLACK_CLIENT_ID: "123.456",
+        SLACK_CLIENT_SECRET: "slack-client-secret-value",
       });
       await instance.dispose();
     } finally {
@@ -725,6 +727,8 @@ describe("PiDriver turns (fake CLI)", () => {
       expect(row.envConfigured).toContain("LLM_GATEWAY_API_KEY");
       expect(row.envConfigured).toContain("AIWAH_CRM_MCP_KEY");
       expect(row.envConfigured).toContain("PLAYWRIGHT_AIWAH_EXTENSION_TOKEN");
+      expect(row.envConfigured).toContain("SLACK_CLIENT_ID");
+      expect(row.envConfigured).toContain("SLACK_CLIENT_SECRET");
     }
     expect(JSON.stringify(rows)).not.toContain("anthropic-secret-value");
     expect(JSON.stringify(rows)).not.toContain("openai-secret-value");

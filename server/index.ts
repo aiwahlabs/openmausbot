@@ -12603,6 +12603,7 @@ function configStatus() {
       llmGatewayConfigured: Boolean(cfg.aiwah?.llmGatewayApiKey),
       crmConfigured: Boolean(cfg.aiwah?.crmApiKey),
       browserConfigured: Boolean(cfg.aiwah?.browserToken),
+      slackOAuthConfigured: Boolean(cfg.aiwah?.slackClientId && cfg.aiwah?.slackClientSecret),
     },
     composio: {
       configured: composio.configured(cfg),
@@ -20929,6 +20930,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (persisted.aiwah?.llmGatewayApiKey !== undefined) persisted.aiwah.llmGatewayApiKey = "";
           if (persisted.aiwah?.crmApiKey !== undefined) persisted.aiwah.crmApiKey = "";
           if (persisted.aiwah?.browserToken !== undefined) persisted.aiwah.browserToken = "";
+          if (persisted.aiwah?.slackClientId !== undefined) persisted.aiwah.slackClientId = "";
+          if (persisted.aiwah?.slackClientSecret !== undefined) persisted.aiwah.slackClientSecret = "";
           saveConfig(persisted);
           configWriteCommitted = true;
           syncCredentialEnv(patch);

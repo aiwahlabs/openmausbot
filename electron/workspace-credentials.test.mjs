@@ -23,7 +23,13 @@ describe("workspace credential migration", () => {
       tts: { key: "tts-secret", fishKey: "fish-secret", voice: "narrator" },
       imageGen: { key: "image-secret" },
       opencodeGo: { apiKey: "ocg-secret" },
-      aiwah: { llmGatewayApiKey: "gateway-secret", crmApiKey: "crm-secret", browserToken: "browser-secret" },
+      aiwah: {
+        llmGatewayApiKey: "gateway-secret",
+        crmApiKey: "crm-secret",
+        browserToken: "browser-secret",
+        slackClientId: "123.456",
+        slackClientSecret: "slack-client-secret",
+      },
       profile: { name: "Ada" },
     };
     const result = migrateWorkspaceCredentials(config, {});
@@ -39,6 +45,8 @@ describe("workspace credential migration", () => {
       aiwahLlmGatewayApiKey: "gateway-secret",
       aiwahCrmApiKey: "crm-secret",
       aiwahBrowserToken: "browser-secret",
+      aiwahSlackClientId: "123.456",
+      aiwahSlackClientSecret: "slack-client-secret",
     });
     // secrets are DELETED (not blanked) so "" stays meaningful as "cleared";
     // non-secret siblings (endpoint url, chosen voice) stay in the file
@@ -137,6 +145,8 @@ describe("workspace credential env", () => {
         aiwahLlmGatewayApiKey: "gateway-secret",
         aiwahCrmApiKey: "crm-secret",
         aiwahBrowserToken: "browser-secret",
+        aiwahSlackClientId: "123.456",
+        aiwahSlackClientSecret: "slack-client-secret",
         composioApiKey: "ak_handled-separately",
       }),
     ).toEqual({
@@ -149,6 +159,8 @@ describe("workspace credential env", () => {
       LLM_GATEWAY_API_KEY: "gateway-secret",
       AIWAH_CRM_MCP_KEY: "crm-secret",
       PLAYWRIGHT_AIWAH_EXTENSION_TOKEN: "browser-secret",
+      SLACK_CLIENT_ID: "123.456",
+      SLACK_CLIENT_SECRET: "slack-client-secret",
     });
   });
 
