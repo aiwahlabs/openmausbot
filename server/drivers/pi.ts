@@ -7,9 +7,9 @@
 // the pi binary itself, so this driver holds no API key and needs no sign-in.
 //
 // Conversation continuity: the first turn sends `new_session` and remembers
-// the returned `sessionFile`; later turns send `switch_session` with that
-// path (the way Claude Code resumes by session id). `sessionFile` is the
-// resumeCursor the harness persists per thread.
+// the returned `sessionFile`. A warm process retains that session directly;
+// after process recycle later turns send `switch_session` with the path.
+// `sessionFile` is the resumeCursor the harness persists per thread.
 //
 // Model ids in the picker are `provider/modelId` composites (e.g.
 // `ollama-cloud/glm-5.2`); `set_model` splits that into pi's separate
@@ -123,7 +123,7 @@ export function piThinkingLevel(effort: EffortLevel): (typeof EFFORT_LEVELS)[num
 /** Mirror of the Claude driver's integration → stdio MCP mount: every entry is
  * a JSON-RPC 2.0 stdio server the pi-mcp-extension consumes. Returns null when
  * there is nothing to mount (the common case). */
-export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | null {
+export function buildMcpServers(turn: SendTurnInput, managed?: { url: string; token: string }): Record<string, unknown> | null {
   const servers: Record<string, unknown> = {};
   if (turn.integrations?.composio) servers.composio = { ...turn.integrations.composio };
   if (turn.integrations?.localComputer) {
@@ -146,6 +146,11 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
       env: { ...NODE_ENV_FLAG, DWEB_URL: turn.integrations.dweb.url },
     };
   }
+  if (managed) servers["aiwah-crm"] = {
+    command: process.execPath,
+    args: [SPAWNED_PROXIES.remoteMcp],
+    env: { OMB_REMOTE_MCP_URL: managed.url, OMB_REMOTE_MCP_TOKEN: managed.token },
+  };
   return Object.keys(servers).length ? servers : null;
 }
 
@@ -407,18 +412,56 @@ export interface PiConfig {
    * this mode — the same knob as Claude's `bypassPermissions` and the ACP
    * engines' `fullAuto`. */
   fullAuto: boolean;
+  /** Organization-managed Pi provider. The token arrives only in the child
+   * environment; this URL and model allowlist are non-secret. */
+  managed?: { url: string; mcpUrl: string; models: string[] };
 }
 
 function decodeConfig(raw: unknown): PiConfig {
   if (raw === null || raw === undefined) return { cli: "pi", fullAuto: false };
   if (typeof raw !== "object") throw new Error("pi config must be an object");
-  const obj = raw as { cli?: unknown; fullAuto?: unknown };
+  const obj = raw as { cli?: unknown; fullAuto?: unknown; managed?: unknown };
   if (obj.cli !== undefined && typeof obj.cli !== "string") throw new Error("pi config `cli` must be a string");
   if (obj.fullAuto !== undefined && typeof obj.fullAuto !== "boolean") throw new Error("pi config `fullAuto` must be a boolean");
+  let managed: PiConfig["managed"];
+  if (obj.managed !== undefined) {
+    if (!obj.managed || typeof obj.managed !== "object" || Array.isArray(obj.managed)) throw new Error("pi managed config must be an object");
+    const value = obj.managed as { url?: unknown; mcpUrl?: unknown; models?: unknown };
+    if (typeof value.url !== "string" || typeof value.mcpUrl !== "string" || !Array.isArray(value.models) || value.models.length < 1 || value.models.length > 500 ||
+        !value.models.every(model => typeof model === "string" && /^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,199}$/.test(model) && !model.includes("::"))) {
+      throw new Error("pi managed config is invalid");
+    }
+    const url = new URL(value.url);
+    const mcpUrl = new URL(value.mcpUrl);
+    if (url.username || url.password || url.search || url.hash ||
+        !(url.protocol === "https:" || (url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)))) {
+      throw new Error("pi managed URL must use HTTPS or loopback");
+    }
+    if (mcpUrl.origin !== url.origin || mcpUrl.username || mcpUrl.password || mcpUrl.search || mcpUrl.hash || mcpUrl.pathname !== "/api/desktop/mcp") {
+      throw new Error("pi managed MCP URL must use the same organization portal");
+    }
+    managed = { url: url.toString().replace(/\/$/, ""), mcpUrl: mcpUrl.toString(), models: [...new Set(value.models as string[])] };
+  }
   return {
     cli: obj.cli && obj.cli.trim() ? obj.cli.trim() : "pi",
     fullAuto: obj.fullAuto === true,
+    ...(managed ? { managed } : {}),
   };
+}
+
+function writeManagedPiProfile(config: NonNullable<PiConfig["managed"]>, env: Record<string, string | undefined>): void {
+  const directory = piAgentDir(env);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const modelRows = config.models.map(id => ({
+    id, name: `${id} (Company)`, reasoning: true, input: ["text", "image"],
+    contextWindow: id.startsWith("gpt-6-") ? 1_050_000 : id.startsWith("grok-") ? 500_000 : 272_000,
+    maxTokens: id.startsWith("grok-") ? 500_000 : 128_000,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  }));
+  writeFileSync(join(directory, "models.json"), `${JSON.stringify({ providers: { aiwah: {
+    baseUrl: config.url, api: "openai-completions", apiKey: "$LLM_GATEWAY_API_KEY", authHeader: true, models: modelRows,
+  } } }, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(join(directory, "settings.json"), `${JSON.stringify({ defaultProvider: "aiwah", defaultModel: config.models[0] }, null, 2)}\n`, { mode: 0o600 });
 }
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
@@ -460,6 +503,12 @@ function piEnvironment(source: Record<string, string | undefined>): Record<strin
   // neither list.
   stripWorkspaceCredentialEnv(env);
   for (const key of PROVIDER_CREDENTIAL_ENV) delete env[key];
+  // The Aiwah profile deliberately consumes this narrow workspace-scoped
+  // credentials. Re-admit only this narrow set after the generic scrub; no
+  // other provider or workspace credential reaches the Pi child.
+  for (const key of ["LLM_GATEWAY_API_KEY", "AIWAH_CRM_MCP_KEY", "PLAYWRIGHT_AIWAH_EXTENSION_TOKEN", "SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET"] as const) {
+    if (source[key]) env[key] = source[key];
+  }
   return env;
 }
 
@@ -482,6 +531,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
   async create(input: DriverCreateInput<PiConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
     const catalogEnv = piEnvironment({ ...process.env, ...input.environment });
+    if (config.managed) writeManagedPiProfile(config.managed, catalogEnv);
     let models = EMPTY;
     const readModels = async () => {
       let base = models;
@@ -515,6 +565,31 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       child?: { stdin: { write: (s: string) => void } };
       steer?: (text: string) => Promise<SteerOutcome>;
     }>();
+    // A Pi RPC process keeps its session and MCP connections warm between
+    // turns on the same thread. Bound idle resources and recycle whenever its
+    // immutable launch context changes (especially integration credentials).
+    const idle = new Map<string, {
+      child: ReturnType<typeof spawnCli>;
+      mcpTempDir: string | null;
+      signature: string;
+      sessionFile: string | null;
+      timer: ReturnType<typeof setTimeout>;
+      onClose: () => void;
+      onError: () => void;
+    }>();
+    const closeIdle = (threadId: string) => {
+      const entry = idle.get(threadId);
+      if (!entry) return;
+      idle.delete(threadId);
+      clearTimeout(entry.timer);
+      entry.child.off("close", entry.onClose);
+      entry.child.off("error", entry.onError);
+      try { entry.child.stdin.end(); } catch { /* already closed */ }
+      try { killCliTree(entry.child); } catch { /* already gone */ }
+      if (entry.mcpTempDir) {
+        try { rmSync(entry.mcpTempDir, { recursive: true, force: true }); } catch { /* best effort */ }
+      }
+    };
 
     const emit = (event: RuntimeEvent) => {
       for (const l of Array.from(listeners)) l(event);
@@ -569,10 +644,34 @@ export const PiDriver: ProviderDriver<PiConfig> = {
 
       // integrations → stdio MCP servers for the pi-mcp-extension. The config
       // carries credentials (box token, composio key, comms token), so it goes
-      // into a 0600 temp file removed when the turn settles — never on argv.
-      const mcpServers = buildMcpServers(turn);
+      // into a 0600 temp file retained only while its Pi process lives —
+      // never on argv.
+      const mcpServers = buildMcpServers(turn, config.managed && catalogEnv.LLM_GATEWAY_API_KEY
+        ? { url: config.managed.mcpUrl, token: catalogEnv.LLM_GATEWAY_API_KEY }
+        : undefined);
+      // The harness revokes these capability tokens when a turn settles and
+      // mints new ones on the next turn. Their MCP proxies cannot be kept
+      // alive safely until they support credential rotation in place.
+      const rotatingCapability = Boolean(
+        turn.integrations?.agents?.env.OMB_COMMS_TOKEN ||
+        turn.integrations?.phone?.env.OMB_PHONE_TOKEN ||
+        turn.integrations?.composio?.env.OMB_CONNECTOR_TOKEN,
+      );
+      const signature = JSON.stringify({ botId: turn.botId, cwd: turn.cwd, mcpServers, model: turn.model, effort: turn.effort, approvalMode: turn.approvalMode, fullAuto });
+      const prior = idle.get(threadId);
+      const canReuse = Boolean(!turn.sessionReset && prior && prior.signature === signature && prior.child.exitCode === null &&
+        prior.child.signalCode === null && (!turn.resumeCursor || turn.resumeCursor === prior.sessionFile));
+      if (prior && !canReuse) closeIdle(threadId);
+      const reused = canReuse ? idle.get(threadId) : undefined;
+      if (reused) {
+        idle.delete(threadId);
+        clearTimeout(reused.timer);
+        reused.child.off("close", reused.onClose);
+        reused.child.off("error", reused.onError);
+      }
       let mcpTempDir: string | null = null;
-      if (mcpServers) {
+      if (reused) mcpTempDir = reused.mcpTempDir;
+      else if (mcpServers) {
         mcpTempDir = mkdtempSync(join(tmpdir(), "omb-pi-mcp-"));
         try {
           writeFileSync(join(mcpTempDir, "mcp.json"), JSON.stringify({ mcpServers }), { mode: 0o600 });
@@ -592,7 +691,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // spawnCli can throw synchronously (unresolvable CLI); if it does, the
       // 0600 temp file with the box token / composio key / comms token must
       // not be left on disk — settle() never runs because no child existed.
-      const child = (() => {
+      const child = reused?.child ?? (() => {
         try {
           return spawnCli(config.cli, childArgs, {
             stdio: ["pipe", "pipe", "pipe"],
@@ -614,6 +713,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           throw err;
         }
       })();
+      let sessionFile: string | null = reused?.sessionFile ?? (!turn.sessionReset && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null);
+      let sessionReady = Boolean(reused);
       let buf = "";
       let assistantText = "";
       // set when a compaction event arrives this turn; gates the receipt
@@ -643,7 +744,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           timer.unref?.();
           responseWaiters.set(key, { resolve, reject, timer });
         });
-      child.stdin.on("error", () => rejectWaiters(new Error("pi stdin closed")));
+      const onStdinError = () => rejectWaiters(new Error("pi stdin closed"));
+      child.stdin.on("error", onStdinError);
       const send = (obj: Record<string, unknown>) => {
         appendNative(threadId, { dir: "out", source: "pi.rpc", msg: piNativeLogMessage(obj) });
         child.stdin.write(JSON.stringify(obj) + "\n");
@@ -678,21 +780,26 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
           ...(usage ? { usage: { input: usage.input ?? 0, output: usage.output ?? 0 } } : {}),
         });
-        try {
-          child.stdin.end();
-        } catch {
-          /* already closed */
-        }
-        try {
-          killCliTree(child);
-        } catch {
-          /* already gone */
-        }
-        if (mcpTempDir) {
-          try {
-            rmSync(mcpTempDir, { recursive: true, force: true });
-          } catch {
-            /* best effort */
+        child.stdout.off("data", onStdoutData);
+        child.off("error", onChildError);
+        child.off("close", onChildClose);
+        child.stdin.off("error", onStdinError);
+        rejectWaiters(new Error("pi turn completed"));
+        if (ok && stopReason !== "cancelled" && !rotatingCapability && sessionReady && child.exitCode === null && child.signalCode === null) {
+          const onClose = () => closeIdle(threadId);
+          const onError = () => closeIdle(threadId);
+          const timer = setTimeout(() => closeIdle(threadId), 5 * 60_000);
+          timer.unref?.();
+          idle.set(threadId, { child, mcpTempDir, signature, sessionFile, timer, onClose, onError });
+          child.on("close", onClose);
+          child.on("error", onError);
+          // Avoid an unbounded fleet of idle Pi/MCP processes.
+          if (idle.size > 4) closeIdle(idle.keys().next().value!);
+        } else {
+          try { child.stdin.end(); } catch { /* already closed */ }
+          try { killCliTree(child); } catch { /* already gone */ }
+          if (mcpTempDir) {
+            try { rmSync(mcpTempDir, { recursive: true, force: true }); } catch { /* best effort */ }
           }
         }
         active.delete(threadId);
@@ -969,7 +1076,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       };
 
       child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
+      const onStdoutData = (chunk: string) => {
         buf += chunk;
         let nl: number;
         while ((nl = buf.indexOf("\n")) !== -1) {
@@ -982,18 +1089,21 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             /* skip non-JSON line */
           }
         }
-      });
-      child.on("error", (err) => {
+      };
+      child.stdout.on("data", onStdoutData);
+      const onChildError = (err: Error) => {
         const fail = describeSpawnFailure(err as NodeJS.ErrnoException, config.cli);
         rejectWaiters(new Error(fail.message));
         emit({ ...base(threadId, turnId), type: "runtime.error", message: fail.message, setup: fail.setup });
         settle(false);
-      });
-      child.on("close", () => {
+      };
+      child.on("error", onChildError);
+      const onChildClose = () => {
         // a clean close without a terminal event is a failed turn, never a hang
         rejectWaiters(new Error("pi process exited before replying"));
         settle(false);
-      });
+      };
+      child.on("close", onChildClose);
 
       emit({ ...base(threadId, turnId), type: "turn.started" });
 
@@ -1001,10 +1111,11 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // harness persists session.started.sessionId as the resumeCursor and
       // hands it back next turn, so that id IS the resume handle — pi's
       // sessionFile, which switch_session expects as `sessionPath`.
-      const sessionPath = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
-      let sessionFile = sessionPath;
-      let sessionReady = false;
+      const sessionPath = !turn.sessionReset && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
       try {
+        if (reused) {
+          emit({ ...base(threadId, turnId), type: "session.started", sessionId: sessionFile, model: turn.model ?? null });
+        } else {
         const command = sessionPath ? "switch_session" : "new_session";
         const hsPromise = awaitResponse(command);
         send(sessionPath ? { type: "switch_session", sessionPath } : { type: "new_session" });
@@ -1017,6 +1128,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           sessionId: sessionFile ?? hs?.sessionId ?? null,
           model: turn.model ?? null,
         });
+        }
       } catch {
         // without a session we can still try a bare prompt; pi --no-session
         // accepts a prompt without an explicit session.
@@ -1055,7 +1167,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // compaction events and drops the receipt the moment one arrives,
       // and re-anchors the full prompt every PI_PROMPT_RE_ANCHOR_TURNS
       // bare turns as a backstop for anything the events miss. Receipts
-      // are durable because the session file outlives both the per-turn
+      // are durable because the session file outlives both the warm
       // child and this process. Without a session the prompt is the
       // model's only context, so that turn keeps the full block and writes
       // no receipt.
@@ -1218,6 +1330,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         hasSession: (threadId) => active.has(threadId),
         stopAll: async () => {
           for (const { stop } of active.values()) stop();
+          for (const threadId of Array.from(idle.keys())) closeIdle(threadId);
         },
         onEvent: (listener) => {
           listeners.add(listener);
@@ -1226,6 +1339,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       },
       dispose: async () => {
         for (const { stop } of active.values()) stop();
+        for (const threadId of Array.from(idle.keys())) closeIdle(threadId);
         listeners.clear();
       },
     };

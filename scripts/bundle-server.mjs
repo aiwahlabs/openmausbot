@@ -65,6 +65,7 @@ const ENTRY_POINTS = [
   "browser-proxy.ts",
   "drivers/agents-proxy.ts",
   "drivers/dweb-proxy.ts",
+  "drivers/http-mcp-proxy.ts",
   "drivers/phone-proxy.ts",
 ];
 

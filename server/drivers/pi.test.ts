@@ -83,6 +83,15 @@ describe("buildMcpServers", () => {
     expect(buildMcpServers({ threadId: "t", text: "hi" })).toBeNull();
   });
 
+  it("mounts the device-scoped HQ CRM for a managed Pi instance", () => {
+    const servers = buildMcpServers({ threadId: "t", text: "hi" }, { url: "https://hq.example.test/api/desktop/mcp", token: "device-scoped" });
+    expect(servers?.["aiwah-crm"]).toEqual({
+      command: process.execPath,
+      args: [expect.stringMatching(/http-mcp-proxy\.(?:ts|js)$/)],
+      env: { OMB_REMOTE_MCP_URL: "https://hq.example.test/api/desktop/mcp", OMB_REMOTE_MCP_TOKEN: "device-scoped" },
+    });
+  });
+
   it("passes composio/agents/phone through as stdio servers", () => {
     const servers = buildMcpServers({
       threadId: "t",
@@ -130,12 +139,15 @@ describe("PiDriver config + install", () => {
     expect(PiDriver.decodeConfig(undefined)).toEqual({ cli: "pi", fullAuto: false });
     expect(PiDriver.decodeConfig(null)).toEqual({ cli: "pi", fullAuto: false });
     expect(PiDriver.decodeConfig({ cli: "  " })).toEqual({ cli: "pi", fullAuto: false });
+    expect(PiDriver.decodeConfig({ fullAuto: true, managed: { url: "https://hq.example.test/api/desktop/gateway/pi/v1", mcpUrl: "https://hq.example.test/api/desktop/mcp", models: ["gpt-6-luna"] } }))
+      .toEqual({ cli: "pi", fullAuto: true, managed: { url: "https://hq.example.test/api/desktop/gateway/pi/v1", mcpUrl: "https://hq.example.test/api/desktop/mcp", models: ["gpt-6-luna"] } });
   });
 
   it("rejects invalid config (throws → shadow snapshot)", () => {
     expect(() => PiDriver.decodeConfig(5)).toThrow(/object/);
     expect(() => PiDriver.decodeConfig({ cli: 5 })).toThrow(/string/);
     expect(() => PiDriver.decodeConfig({ fullAuto: "yes" })).toThrow(/boolean/);
+    expect(() => PiDriver.decodeConfig({ managed: { url: "http://hq.example.test", mcpUrl: "http://hq.example.test/api/desktop/mcp", models: ["gpt-6-luna"] } })).toThrow(/HTTPS/);
   });
 
   it("publishes the npm installer on every platform and points docs at pi.dev", () => {
@@ -328,6 +340,68 @@ describe("PiDriver turns (fake CLI)", () => {
       | { sessionId: string }
       | undefined;
     expect(secondSession?.sessionId).toBe(firstSession?.sessionId);
+  });
+
+  it("reuses the Pi process for a stable thread and recycles it when the model changes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-warm-"));
+    const dump = join(dir, "launches.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    writeFileSync(dump, ""); // exclude the startup catalog probe
+    const threadId = `t-warm-${randomUUID()}`;
+    const launchCount = () => readFileSync(dump, "utf8").split("\n").filter(Boolean)
+      .map((line) => JSON.parse(line) as { argv?: string[] })
+      .filter((row) => row.argv?.includes("rpc")).length;
+
+    const first = await instance.adapter.sendTurn({ threadId, text: "first", model: "openai/gpt-4o" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    expect(launchCount()).toBe(1);
+
+    const second = await instance.adapter.sendTurn({ threadId, text: "second", model: "openai/gpt-4o" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+    expect(launchCount()).toBe(1);
+
+    const third = await instance.adapter.sendTurn({ threadId, text: "third", model: "ollama-cloud/glm-5.2" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === third.turnId);
+    expect(launchCount()).toBe(2);
+  });
+
+  it("does not retain a proxy with a turn-scoped harness capability", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-capability-"));
+    const dump = join(dir, "launches.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    writeFileSync(dump, "");
+    const threadId = `t-capability-${randomUUID()}`;
+    const input = {
+      threadId,
+      text: "hi",
+      integrations: { agents: { command: "node", args: ["agents-proxy.js"], env: { OMB_COMMS_TOKEN: "turn-token" } } },
+    };
+    const first = await instance.adapter.sendTurn(input);
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    const second = await instance.adapter.sendTurn(input);
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+    const launches = readFileSync(dump, "utf8").split("\n").filter(Boolean)
+      .map((line) => JSON.parse(line) as { argv?: string[] })
+      .filter((row) => row.argv?.includes("rpc"));
+    expect(launches).toHaveLength(2);
+  });
+
+  it("starts a new Pi session when the harness resets the thread", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-reset-"));
+    const dump = join(dir, "launches.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    writeFileSync(dump, "");
+    const threadId = `t-reset-${randomUUID()}`;
+    const first = await instance.adapter.sendTurn({ threadId, text: "first" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    const session = recorder.events.find((event) => event.type === "session.started" && event.turnId === first.turnId) as
+      | { sessionId: string } | undefined;
+    const second = await instance.adapter.sendTurn({ threadId, text: "fresh", resumeCursor: session?.sessionId, sessionReset: true });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+    const launches = readFileSync(dump, "utf8").split("\n").filter(Boolean)
+      .map((line) => JSON.parse(line) as { argv?: string[] })
+      .filter((row) => row.argv?.includes("rpc"));
+    expect(launches).toHaveLength(2);
   });
 
   it("delivers the full prompt once per session and rides volatile changes as notes", async () => {
@@ -622,7 +696,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(levels).toEqual(["off"]);
   });
 
-  it("scrubs provider and workspace credentials from every pi child env", async () => {
+  it("scrubs foreign credentials while admitting only the Aiwah Pi credential set", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-dump-"));
     const dump = join(dir, "dump.jsonl");
     // Plant a workspace credential on the harness process itself — the leak
@@ -636,6 +710,11 @@ describe("PiDriver turns (fake CLI)", () => {
         FAKE_PI_DUMP: dump,
         ANTHROPIC_API_KEY: "anthropic-secret-value",
         OPENAI_API_KEY: "openai-secret-value",
+        LLM_GATEWAY_API_KEY: "gateway-secret-value",
+        AIWAH_CRM_MCP_KEY: "crm-secret-value",
+        PLAYWRIGHT_AIWAH_EXTENSION_TOKEN: "browser-secret-value",
+        SLACK_CLIENT_ID: "123.456",
+        SLACK_CLIENT_SECRET: "slack-client-secret-value",
       });
       await instance.dispose();
     } finally {
@@ -657,6 +736,11 @@ describe("PiDriver turns (fake CLI)", () => {
       expect(row.envConfigured).not.toContain("OPENAI_API_KEY");
       expect(row.envConfigured).not.toContain("XAI_API_KEY");
       expect(row.envConfigured).not.toContain("BOX_TOKEN");
+      expect(row.envConfigured).toContain("LLM_GATEWAY_API_KEY");
+      expect(row.envConfigured).toContain("AIWAH_CRM_MCP_KEY");
+      expect(row.envConfigured).toContain("PLAYWRIGHT_AIWAH_EXTENSION_TOKEN");
+      expect(row.envConfigured).toContain("SLACK_CLIENT_ID");
+      expect(row.envConfigured).toContain("SLACK_CLIENT_SECRET");
     }
     expect(JSON.stringify(rows)).not.toContain("anthropic-secret-value");
     expect(JSON.stringify(rows)).not.toContain("openai-secret-value");

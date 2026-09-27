@@ -40,6 +40,36 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "sk-…",
     helpUrl: "https://platform.openai.com/api-keys",
   },
+  aiwahLlmGatewayApiKey: {
+    label: "Aiwah model gateway key",
+    description: "Lets the Aiwah Pi profile use the company model catalog.",
+    placeholder: "Paste the key supplied by your Aiwah workspace owner",
+    helpUrl: "https://github.com/aiwahlabs/aiwah-workspace",
+  },
+  aiwahCrmApiKey: {
+    label: "Aiwah HQ access key",
+    description: "Lets Aiwah Pi read and update the company HQ/CRM.",
+    placeholder: "Paste the key supplied by your Aiwah workspace owner",
+    helpUrl: "https://github.com/aiwahlabs/aiwah-workspace",
+  },
+  aiwahBrowserToken: {
+    label: "Aiwah browser token",
+    description: "Lets Aiwah Pi use the authenticated company browser profile.",
+    placeholder: "Paste the token supplied by your Aiwah workspace owner",
+    helpUrl: "https://github.com/aiwahlabs/aiwah-workspace",
+  },
+  aiwahSlackClientId: {
+    label: "Aiwah Slack OAuth Client ID",
+    description: "Identifies the company Slack app used for personal teammate authorization.",
+    placeholder: "Paste the Client ID supplied by your Aiwah workspace owner",
+    helpUrl: "https://github.com/aiwahlabs/aiwah-workspace",
+  },
+  aiwahSlackClientSecret: {
+    label: "Aiwah Slack OAuth Client Secret",
+    description: "Lets the local setup flow exchange your one-time Slack authorization code.",
+    placeholder: "Paste the Client Secret supplied by your Aiwah workspace owner",
+    helpUrl: "https://github.com/aiwahlabs/aiwah-workspace",
+  },
 } as const;
 
 export type CredentialTargetId = keyof typeof CREDENTIAL_TARGETS;
@@ -49,6 +79,7 @@ export type CredentialConfig = {
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; fishKey?: string };
   imageGen?: { key?: string };
+  aiwah?: { llmGatewayApiKey?: string; crmApiKey?: string; browserToken?: string; slackClientId?: string; slackClientSecret?: string };
 };
 
 export function isCredentialTargetId(value: unknown): value is CredentialTargetId {
@@ -69,6 +100,16 @@ export function credentialConfigPatch(id: CredentialTargetId, value: string): Cr
       return { tts: { fishKey: value } };
     case "openaiImageApiKey":
       return { imageGen: { key: value } };
+    case "aiwahLlmGatewayApiKey":
+      return { aiwah: { llmGatewayApiKey: value } };
+    case "aiwahCrmApiKey":
+      return { aiwah: { crmApiKey: value } };
+    case "aiwahBrowserToken":
+      return { aiwah: { browserToken: value } };
+    case "aiwahSlackClientId":
+      return { aiwah: { slackClientId: value } };
+    case "aiwahSlackClientSecret":
+      return { aiwah: { slackClientSecret: value } };
   }
 }
 
@@ -86,6 +127,16 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.tts?.fishKey);
     case "openaiImageApiKey":
       return Boolean(config.imageGen?.key);
+    case "aiwahLlmGatewayApiKey":
+      return Boolean(config.aiwah?.llmGatewayApiKey);
+    case "aiwahCrmApiKey":
+      return Boolean(config.aiwah?.crmApiKey);
+    case "aiwahBrowserToken":
+      return Boolean(config.aiwah?.browserToken);
+    case "aiwahSlackClientId":
+      return Boolean(config.aiwah?.slackClientId);
+    case "aiwahSlackClientSecret":
+      return Boolean(config.aiwah?.slackClientSecret);
   }
 }
 

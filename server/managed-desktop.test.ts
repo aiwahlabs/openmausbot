@@ -67,6 +67,15 @@ it("keeps routing and secrets per instance and uses separate device-scoped Claud
   expect(codex.environment).not.toHaveProperty("OPENAI_API_KEY");
 });
 
+it("routes an Aiwah managed Pi instance through its device-scoped HQ gateway", () => {
+  const value = { ...connection(), providers: [{ id: "pi" as const, configured: true, models: ["gpt-6-luna", "grok-4.7"] }] };
+  const runtime = "/fixture/company-runtime", id = companyInstanceId(value, "pi");
+  const pi = companyInstanceConfigs(value, runtime)[id];
+  expect(pi.driver).toBe("piAgent");
+  expect(pi.config).toEqual({ fullAuto: true, managed: { url: `${value.portalOrigin}/api/desktop/gateway/pi/v1`, mcpUrl: `${value.portalOrigin}/api/desktop/mcp`, models: ["gpt-6-luna", "grok-4.7"] } });
+  expect(pi.environment).toEqual({ HOME: join(runtime, id, "pi"), LLM_GATEWAY_API_KEY: value.token });
+});
+
 it("preserves native sessions across restart and re-enrolment of the same person, never for another account", async () => {
   const dataDirectory = join(DATA_DIR, `company-restart-${randomUUID()}`), value = connection();
   const first = await setup({ dataDirectory });

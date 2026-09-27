@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { TurnResources, workspaceResource } from "./turn-resources.ts";
+import { collaborativeWorkspace, TurnResources, workspaceResource } from "./turn-resources.ts";
 
 const a = { threadId: "a", generation: "1" };
 const b = { threadId: "b", generation: "2" };
@@ -75,6 +75,20 @@ describe("thread resource ownership", () => {
       const leases = new TurnResources();
       expect(leases.claim(workspaceResource(folder), a)).toBe(true);
       expect(leases.claim(workspaceResource(alias), b)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("recognises only the exact opted-in collaborative root", () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-collaborative-workspace-"));
+    try {
+      const project = join(root, "project");
+      mkdirSync(project);
+      expect(collaborativeWorkspace(root, root)).toBe(true);
+      expect(collaborativeWorkspace(project, root)).toBe(false);
+      expect(collaborativeWorkspace(root, "")).toBe(false);
+      expect(collaborativeWorkspace(root, join(root, "missing"))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

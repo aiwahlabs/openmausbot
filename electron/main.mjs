@@ -82,6 +82,25 @@ import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDes
 import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
+import { applyDesktopUserDataOverride } from "./data-paths.mjs";
+import {
+  AIWAH_LOGIN_ARGUMENT,
+  applyAiwahRuntimeEnvironment,
+  handleAiwahLoginItemAction,
+} from "./aiwah-workspace-runtime.mjs";
+
+if (handleAiwahLoginItemAction(app)) process.exit(0);
+
+// An Aiwah installation keeps only this secret-free pointer outside the
+// workspace. It makes Finder/Login Item launches resolve the same durable
+// workspace data and collaborative execution root as the managed CLI launch.
+applyAiwahRuntimeEnvironment();
+process.argv = process.argv.filter((argument) => argument !== AIWAH_LOGIN_ARGUMENT);
+
+// Apply before the first app.getPath("userData") call. This keeps Electron
+// cookies, safeStorage ciphertext, CUA state and window state beside a managed
+// harness data directory without changing the default desktop behavior.
+applyDesktopUserDataOverride(app);
 
 const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
 const nativeActions = nativeDesktopActions(process.platform);
@@ -2737,6 +2756,11 @@ const CREDENTIAL_PATCH = {
   fishAudioKey: (value) => ({ tts: { fishKey: value } }),
   openaiImageApiKey: (value) => ({ imageGen: { key: value } }),
   customImageApiKey: (value) => ({ imageGen: { customApiKey: value } }),
+  aiwahLlmGatewayApiKey: (value) => ({ aiwah: { llmGatewayApiKey: value } }),
+  aiwahCrmApiKey: (value) => ({ aiwah: { crmApiKey: value } }),
+  aiwahBrowserToken: (value) => ({ aiwah: { browserToken: value } }),
+  aiwahSlackClientId: (value) => ({ aiwah: { slackClientId: value } }),
+  aiwahSlackClientSecret: (value) => ({ aiwah: { slackClientSecret: value } }),
 };
 
 async function saveWorkspaceCredential(name, value) {

@@ -4,11 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
+import type { ModelSelection } from "./contracts.ts";
 import { canAccessTeam } from "./peer-roster.ts";
 import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 
-function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean }>) {
+function harness(
+  caps?: Record<string, { driverKind: string; agentsMcp: boolean }>,
+  creationDefaults?: () => { cwd?: string; modelSelection?: ModelSelection; soulPrefix?: string },
+) {
   const bots: BotRecord[] = [];
   const messages: Array<{ id: string; card?: OptionCardData }> = [];
   const teams = ["", "Work", "Engineering", "Private"];
@@ -46,6 +50,7 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
   const canPersist = vi.fn((): { ok: true } | { ok: false; status: number; error: string } => ({ ok: true }));
   const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, canAccessTeam,
     canPersist, ownsThread: () => sourceExists, targetBusy, deleteBot, autoApply, validateChange,
+    ...(creationDefaults ? { creationDefaults } : {}),
     validateModel: (selection, current) => {
       if (!({ claude: ["sonnet", "opus"], codex: ["gpt-fixture"] }[selection.instanceId]?.includes(selection.model))) return "Model is not in the current catalog";
       return current?.approvalMode === "full" && selection.instanceId !== current.modelSelection.instanceId ? "Existing permissions are incompatible" : null;
@@ -140,7 +145,8 @@ describe("reviewed Chief team setup", () => {
   it("shows what stays owner-owned after creation on create cards, and keeps update cards lean", () => {
     const h = harness();
     const create = h.propose([specialist("Mira", "Work")]);
-    expect(create.detail).toContain("New bots stay owner-owned after creation: connected apps off, approvals at Ask, a private workspace by default, avatar untouched.");
+    expect(create.detail).toContain("the configured shared workspace by default");
+    expect(create.detail).toContain("deliberate private low-context exception");
     expect(create.detail).toContain("Existing execution permissions are unchanged.");
     const update = h.propose([{ action: "update", botId: h.peer.id, fields: { title: "Research lead" } }]);
     expect(update.detail).not.toContain("owner-owned");
@@ -158,6 +164,31 @@ describe("reviewed Chief team setup", () => {
       .toThrow(`that folder doesn't exist: ${join(folder, "missing")}`);
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { cwd: folder } }]))
       .toThrow("A working folder can only be chosen when creating a bot; propose_profile changes it later");
+  });
+  it("inherits configured workspace and model defaults for a new specialist unless the Chief explicitly overrides them", () => {
+    const folder = mkdtempSync(join(tmpdir(), "omb-team-defaults-"));
+    const h = harness(undefined, () => ({
+      cwd: folder,
+      modelSelection: { instanceId: "claude", model: "sonnet", effort: "high" },
+      soulPrefix: "You work for Aiwah Labs.",
+    }));
+    const inherited = h.propose([{ action: "create", key: "Inherited", fields: {
+      name: "Inherited", title: "Specialist", soul: "Finish the assigned work.", section: "Work",
+    } }]);
+    expect(inherited.detail).toContain(`Working folder: "${folder}"`);
+    expect(inherited.detail).toContain("claude/sonnet");
+    expect(h.messages[0].card?.teamSetupRequest?.operations[0]?.fields).toMatchObject({
+      cwd: folder,
+      modelSelection: { instanceId: "claude", model: "sonnet", effort: "high" },
+      soul: "You work for Aiwah Labs.\n\nSpecialist mandate:\nFinish the assigned work.",
+    });
+
+    const explicit = h.propose([{ action: "create", key: "Private", fields: {
+      name: "Private", title: "Specialist", soul: "Finish the assigned work.", section: "Work", cwd: "",
+      modelSelection: { instanceId: "codex", model: "gpt-fixture", effort: "low" },
+    } }]);
+    expect(h.messages.find(message => message.card?.requestId === explicit.requestId)?.card?.teamSetupRequest?.operations[0]?.fields)
+      .toMatchObject({ cwd: "", modelSelection: { instanceId: "codex", model: "gpt-fixture", effort: "low" } });
   });
   it("carries a model variant through the plan instead of dropping it", () => {
     const h = harness();

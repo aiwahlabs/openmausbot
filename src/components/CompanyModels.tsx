@@ -9,7 +9,7 @@ import { t } from "@/lib/i18n";
 import { companyInstanceFor, instanceCanRun, planCompanySwitch } from "@/lib/company-models";
 import { EngineSetup, needsCli } from "./EngineSetup";
 
-const providerNames: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter" };
+const providerNames: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter", pi: "Aiwah Pi" };
 
 export function CompanyModels({ providers }: { providers: ReadonlyArray<{ id: string; configured: boolean; models: readonly string[] }> }) {
   const { state, dispatch, flushBotPatches } = useStore();

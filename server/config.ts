@@ -354,6 +354,9 @@ const appConfigSchema = z.object({
    * addresses or `@domain` entries; admins get every scope, members chat only. */
   signIn: z.object({ admins: z.array(z.string().max(320)).max(500).optional(), members: z.array(z.string().max(320)).max(5000).optional() }).optional(),
   defaultModelSelection: defaultModelSelectionSchema.optional(),
+  /** Optional first-run identity for the bot seeded into an empty workspace.
+   * Later bots continue to use newBotDefaults. */
+  starterBotDefaults: newBotDefaultsSchema.optional(),
   newBotDefaults: newBotDefaultsSchema.optional(),
   newBots: newBotsConfigSchema.optional(),
   /** CLI-only launch preferences. Never enable remote access implicitly. */
@@ -398,6 +401,15 @@ const appConfigSchema = z.object({
   openaiCompat: z
     .object({ key: optionalText, url: optionalText, model: optionalText, provider: optionalText })
     .optional(),
+  /** Aiwah workspace credentials are write-only and are consumed only by the
+   * Pi runtime profile. Packaged desktop builds keep them in safeStorage. */
+  aiwah: z.object({
+    llmGatewayApiKey: optionalText,
+    crmApiKey: optionalText,
+    browserToken: optionalText,
+    slackClientId: optionalText,
+    slackClientSecret: optionalText,
+  }).optional(),
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
@@ -482,6 +494,8 @@ export interface AppConfig {
   signIn?: { admins?: string[]; members?: string[] };
   /** Preferred selection for newly created bots; existing bots keep theirs. */
   defaultModelSelection?: ModelSelection;
+  /** Creation template used only for the bot seeded into an empty workspace. */
+  starterBotDefaults?: NewBotDefaults;
   /** UI creation template. Saving it never mutates a bot or grants access. */
   newBotDefaults?: NewBotDefaults;
   /** Defaults for newly created bots that no model selection carries. */
@@ -500,6 +514,7 @@ export interface AppConfig {
   decisions?: { retentionDays?: number };
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
+  aiwah?: { llmGatewayApiKey?: string; crmApiKey?: string; browserToken?: string; slackClientId?: string; slackClientSecret?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   box?: { token?: string };
   /** A named host from the user's SSH config. Authentication stays with SSH. */
@@ -873,6 +888,12 @@ export function loadConfig(): AppConfig {
   cfg.imageGen = { ...cfg.imageGen };
   if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
   if (process.env.OMB_CUSTOM_IMAGE_KEY !== undefined) cfg.imageGen.customApiKey = process.env.OMB_CUSTOM_IMAGE_KEY;
+  cfg.aiwah = { ...cfg.aiwah };
+  if (process.env.LLM_GATEWAY_API_KEY !== undefined) cfg.aiwah.llmGatewayApiKey = process.env.LLM_GATEWAY_API_KEY;
+  if (process.env.AIWAH_CRM_MCP_KEY !== undefined) cfg.aiwah.crmApiKey = process.env.AIWAH_CRM_MCP_KEY;
+  if (process.env.PLAYWRIGHT_AIWAH_EXTENSION_TOKEN !== undefined) cfg.aiwah.browserToken = process.env.PLAYWRIGHT_AIWAH_EXTENSION_TOKEN;
+  if (process.env.SLACK_CLIENT_ID !== undefined) cfg.aiwah.slackClientId = process.env.SLACK_CLIENT_ID;
+  if (process.env.SLACK_CLIENT_SECRET !== undefined) cfg.aiwah.slackClientSecret = process.env.SLACK_CLIENT_SECRET;
   // The sign-in allow-list: env is how a headless box or a container is
   // bootstrapped before anyone can reach Settings.
   const splitEmails = (value: string) => value.split(/[,\s]+/).map((entry) => entry.trim().toLowerCase()).filter(Boolean);
@@ -904,6 +925,11 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.tts?.fishKey, "OMB_FISH_AUDIO_API_KEY"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
+    [patch.aiwah?.llmGatewayApiKey, "LLM_GATEWAY_API_KEY"],
+    [patch.aiwah?.crmApiKey, "AIWAH_CRM_MCP_KEY"],
+    [patch.aiwah?.browserToken, "PLAYWRIGHT_AIWAH_EXTENSION_TOKEN"],
+    [patch.aiwah?.slackClientId, "SLACK_CLIENT_ID"],
+    [patch.aiwah?.slackClientSecret, "SLACK_CLIENT_SECRET"],
   ];
   for (const [value, name] of secrets) {
     if (value === undefined) continue;
@@ -945,6 +971,11 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OMB_FISH_AUDIO_API_KEY",
   "OMB_OPENAI_IMAGE_KEY",
   "OMB_CUSTOM_IMAGE_KEY",
+  "LLM_GATEWAY_API_KEY",
+  "AIWAH_CRM_MCP_KEY",
+  "PLAYWRIGHT_AIWAH_EXTENSION_TOKEN",
+  "SLACK_CLIENT_ID",
+  "SLACK_CLIENT_SECRET",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   // Harness-private filesystem hints are not credentials themselves, but
@@ -1036,7 +1067,7 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "aiwah", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
@@ -1080,6 +1111,9 @@ export function saveConfig(
     } else {
       delete disk.defaultModelSelection;
     }
+  }
+  if (checkedPatch.starterBotDefaults !== undefined) {
+    disk.starterBotDefaults = checkedPatch.starterBotDefaults;
   }
   if (checkedPatch.cliStartup !== undefined) disk.cliStartup = checkedPatch.cliStartup;
   // Custom MCP mutations go through their own dedicated local API, but

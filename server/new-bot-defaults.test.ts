@@ -21,6 +21,15 @@ describe("new-bot templates", () => {
     ]) expect(newBotDefaultsSchema.safeParse({ profile }).success).toBe(false);
   });
 
+  it("keeps the empty-workspace starter template separate from later bot defaults", () => {
+    const patch = parseConfigPatch({
+      starterBotDefaults: { profile: { name: "Aiwah Setup", title: "Workspace Setup Guide" } },
+      newBotDefaults: { profile: { title: "Aiwah operator" } },
+    });
+    expect(patch.starterBotDefaults?.profile.name).toBe("Aiwah Setup");
+    expect(patch.newBotDefaults?.profile.name).toBeUndefined();
+  });
+
   it("never permits memory paths to escape the new bot's memory folder", () => {
     const accepted = { "MEMORY.md": "Index", "memory/preferences.md": "Keep replies short" };
     expect(newBotDefaultsSchema.parse({ memory: accepted }).memory).toEqual(accepted);
