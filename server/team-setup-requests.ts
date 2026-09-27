@@ -86,6 +86,10 @@ interface SetupStore {
 interface Options {
   store: SetupStore;
   teams(): string[];
+  /** Preferences inherited by a newly created teammate when the Chief does
+   * not choose an explicit value. Keep this narrower than permissions: team
+   * setup may inherit where/how a bot works, never an execution grant. */
+  creationDefaults?(): Pick<TeamSetupFields, "cwd" | "modelSelection"> & { soulPrefix?: string };
   canAccessTeam(from: BotRecord, target?: string): boolean;
   canPersist(botId: string, threadId: string): { ok: true } | { ok: false; status: number; error: string };
   validateModel(selection: ModelSelection, current?: BotRecord): string | null;
@@ -217,7 +221,22 @@ export class TeamSetupRequestService {
     if (combined.size > 8) throw new TeamSetupError("Review at most eight bots in one setup");
     const operations: TeamSetupOperation[] = [...combined.values()].map((operation) => {
       const target = operation.action === "update" ? this.options.store.bot(operation.botId) : undefined;
-      const fields = this.fields({ ...operation.fields, section: operation.fields.section ?? target?.section ?? chief.section ?? "" }, target ?? undefined);
+      // A Chief-created teammate is an ordinary new bot, so omission means
+      // the workspace's configured creation preference just as it does in
+      // the desktop dialog. Explicit values still win: cwd "" deliberately
+      // opts into the private task workspace and an explicit model selection
+      // (including effort/variant) overrides the configured default.
+      const inherited = operation.action === "create" ? (this.options.creationDefaults?.() ?? {}) : {};
+      const { soulPrefix, ...inheritedFields } = inherited;
+      const specialistSoul = operation.fields.soul?.trim();
+      const fields = this.fields({
+        ...inheritedFields,
+        ...operation.fields,
+        ...(operation.action === "create" && soulPrefix && specialistSoul
+          ? { soul: `${soulPrefix}\n\nSpecialist mandate:\n${specialistSoul}` }
+          : {}),
+        section: operation.fields.section ?? target?.section ?? chief.section ?? "",
+      }, target ?? undefined);
       return { action: operation.action, botId: operation.action === "create" ? newId() : operation.botId,
         ...(operation.action === "create" ? { threadId: newId() } : {}),
         fields,
@@ -307,7 +326,7 @@ export class TeamSetupRequestService {
       // Informed consent: creation locks the new bot down, and the owner
       // signs off on that whole state, not just the two facts named before.
       if (request.operations.some((operation) => operation.action === "create")) {
-        lines.push("New bots stay owner-owned after creation: connected apps off, approvals at Ask, a private workspace by default, avatar untouched.");
+        lines.push("New bots stay owner-owned after creation: connected apps off, approvals at Ask, the configured shared workspace by default, avatar untouched. An explicitly empty working folder is the deliberate private low-context exception.");
       }
       lines.push("Existing execution permissions are unchanged.");
     }

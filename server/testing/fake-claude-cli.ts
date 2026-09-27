@@ -307,7 +307,7 @@ const playTurn = (prompt: JsonValue) => {
     }
     writeFileSync(
       process.env.FAKE_CLAUDE_DUMP,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, systemPrompt, mcpConfig, settings, settingsMode }, null, 2),
+      JSON.stringify({ pid: process.pid, cwd: process.cwd(), argv, env: process.env, prompt, systemPrompt, mcpConfig, settings, settingsMode }, null, 2),
     );
   }
 

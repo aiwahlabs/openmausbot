@@ -378,7 +378,7 @@
     },
     {
       "name": "create_bot",
-      "description": "Create a specialist bot in your section. Chief of Staff only. Omit modelSelection to use the workspace default, or choose exact IDs from list_team_setup. Connected apps and automatic approvals start disabled. Assign work through delegate_bot. Maximum four new bots per turn.",
+      "description": "Create a specialist bot in your section. Chief of Staff only. Omit modelSelection and cwd to inherit the configured workspace defaults, or choose an exact model plus supported reasoning effort from list_team_setup. Pass cwd as an empty string only when the person deliberately wants a private, low-context bot. Connected apps and automatic approvals start disabled. Assign work through delegate_bot. Maximum four new bots per turn.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -405,10 +405,12 @@
                 "type": "string"
               },
               "effort": {
-                "type": "string"
+                "type": "string",
+                "description": "Optional reasoning effort advertised for this engine by list_team_setup. Do not combine with variant."
               },
               "variant": {
-                "type": "string"
+                "type": "string",
+                "description": "Optional model-specific variant. Do not combine with effort."
               }
             },
             "required": [
@@ -419,7 +421,7 @@
           "cwd": {
             "type": "string",
             "maxLength": 1024,
-            "description": "Absolute path of the folder this specialist's tools read and write in (for example /Users/me/Projects/site). It must already exist. Leave it out for the specialist's private workspace."
+            "description": "Absolute path of the folder this specialist's tools read and write in. It must already exist. Omit it to inherit the configured workspace; use an empty string only for a deliberately private, low-context workspace."
           }
         },
         "required": [
@@ -446,7 +448,7 @@
     },
     {
       "name": "propose_team_setup",
-      "description": "Chief of Staff only: submit all requested specialist creation, profile/model configuration, Chief assignments, and authorized team moves in ONE combined plan. Use exact catalog engine/model IDs from list_team_setup. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; access is granted only to those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. If review is pending, the decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal. Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.",
+      "description": "Chief of Staff only: submit all requested specialist creation, profile/model configuration, Chief assignments, and authorized team moves in ONE combined plan. New bots inherit configured workspace/model defaults when cwd or modelSelection is omitted; choose exact catalog IDs and a supported reasoning effort from list_team_setup when the work needs a deliberate override. An empty cwd explicitly requests a private, low-context workspace. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; access is granted only to those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. If review is pending, the decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal. Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -515,7 +517,7 @@
                     "cwd": {
                       "type": "string",
                       "maxLength": 1024,
-                      "description": "Create only: absolute path of the folder the new bot's tools read and write in. It must already exist. Leave it out for a private workspace."
+                      "description": "Create only: absolute existing folder. Omit to inherit the configured workspace; use an empty string only for a deliberately private, low-context workspace."
                     },
                     "section": {
                       "type": "string",
@@ -533,10 +535,12 @@
                           "type": "string"
                         },
                         "effort": {
-                          "type": "string"
+                          "type": "string",
+                          "description": "Optional supported reasoning effort from list_team_setup. Do not combine with variant."
                         },
                         "variant": {
-                          "type": "string"
+                          "type": "string",
+                          "description": "Optional model-specific variant. Do not combine with effort."
                         }
                       },
                       "required": [
@@ -678,7 +682,12 @@
               "opencodeGoApiKey",
               "ttsKey",
               "fishAudioKey",
-              "openaiImageApiKey"
+              "openaiImageApiKey",
+              "aiwahLlmGatewayApiKey",
+              "aiwahCrmApiKey",
+              "aiwahBrowserToken",
+              "aiwahSlackClientId",
+              "aiwahSlackClientSecret"
             ],
             "description": "The credential the current task requires."
           },

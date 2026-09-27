@@ -418,7 +418,7 @@ import { ProfileRequestService } from "./profile-requests.ts";
 import { ModelRequestService } from "./model-requests.ts";
 import { TighteningRequestService } from "./tightening-requests.ts";
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
-import type { TeamSetupRequest } from "../shared/team-setup.ts";
+import type { TeamSetupFields, TeamSetupRequest } from "../shared/team-setup.ts";
 import { profileRevision, profileSnapshot } from "./profile-revision.ts";
 import { flushAllProfileHistory, flushProfileHistory, readHistory, recordProfileChange } from "./profile-versions.ts";
 import { fetchBotDirectory, matchDirectoryBots, type MatchedDirectoryBot } from "./bot-directory.ts";
@@ -2690,6 +2690,14 @@ function newBotSettingsPatch(bot: BotRecord, settings: ResolvedNewBotSettings, s
     mcpServers: ordinary.mcpServers ?? undefined,
     browserProfile: ordinary.browserProfile || undefined,
     autoApprove: ordinary.approvalMode === "auto",
+  };
+}
+function configuredTeamCreationDefaults(): Pick<TeamSetupFields, "cwd" | "modelSelection"> & { soulPrefix?: string } {
+  const settings = resolveBotCreationDefaults(cfg.newBotDefaults, {}).profile;
+  return {
+    ...(settings.cwd !== undefined ? { cwd: settings.cwd ?? "" } : {}),
+    ...(settings.modelSelection ? { modelSelection: structuredClone(settings.modelSelection) } : {}),
+    ...(settings.soul?.trim() ? { soulPrefix: settings.soul.trim() } : {}),
   };
 }
 const teamComputers = new TeamComputers(join(DATA_DIR, "team-computers.json"), ENVIRONMENT_ID);
@@ -9515,6 +9523,7 @@ const tighteningRequests = new TighteningRequestService({
 const teamSetupTeams = () => [...new Set(["", ...readSections(), ...store.bots.map((bot) => sectionKey(bot.section)), ...store.groups.map((group) => sectionKey(group.section))])];
 const teamSetupRequests = new TeamSetupRequestService({
   store, teams: teamSetupTeams, canAccessTeam, canPersist: proposalPersistence, maxBots: MAX_WORKSPACE_BOTS,
+  creationDefaults: configuredTeamCreationDefaults,
   autoApply: fullAccessForSource,
   validateChange: (before, fields) => assertTeamComputerChangeIdle(before, { ...before, ...fields }),
   ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
@@ -15286,23 +15295,37 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (instructions.length > 1_000) {
           return json(res, 400, { error: "instructions must be at most 1000 characters" });
         }
+        let creationTemplate: ReturnType<typeof resolveBotCreationDefaults>;
+        try {
+          creationTemplate = resolveBotCreationDefaults(cfg.newBotDefaults, {
+            name,
+            title: role,
+            description: instructions,
+            settings: {
+              ...(body.modelSelection !== undefined ? { modelSelection: body.modelSelection } : {}),
+              ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
+            },
+          });
+        } catch (error) {
+          const status = typeof error === "object" && error && "status" in error && typeof error.status === "number" ? error.status : 400;
+          return json(res, status, { error: error instanceof Error ? error.message : String(error) });
+        }
+        const settings = creationTemplate.profile;
         let selection: ModelSelection;
-        if (body.modelSelection === undefined) {
+        if (settings.modelSelection === undefined) {
           selection = await defaultSelection();
         } else {
-          const checked = checkedModelSelection(body.modelSelection, undefined, true);
+          const checked = checkedModelSelection(settings.modelSelection, undefined, true);
           if (!checked.ok) return json(res, checked.status, { error: checked.error });
           selection = checked.selection;
         }
         if (hostedModels && !hostedModels.allows(selection)) return json(res, 400, { error: hostedModels.error() });
         // The same check the profile path runs: absolute, exists, is a
-        // folder. Creation names where the specialist works; nothing looser.
-        let cwd: string | undefined;
-        if (body.cwd !== undefined) {
-          const checkedCwd = validateBotCwd(body.cwd);
-          if (!checkedCwd.ok) return json(res, 400, { error: checkedCwd.error });
-          cwd = checkedCwd.cwd ?? undefined;
-        }
+        // folder. Omission inherits the configured new-bot workspace; an
+        // explicit blank opts into the private task workspace.
+        const checkedCwd = validateBotCwd(settings.cwd ?? null);
+        if (!checkedCwd.ok) return json(res, 400, { error: checkedCwd.error });
+        const cwd = checkedCwd.cwd ?? undefined;
         // Discovery can yield; check current authority and capacity again before writing.
         if (store.bot(chief.id) !== chief || chief.hidden || !chief.chiefOfStaff || !connectorThread(chief.id, fromThreadId)) {
           return json(res, 403, { error: "only an active Chief of Staff can create operator bots" });
@@ -15318,11 +15341,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (duplicate) {
           return json(res, 409, { error: `@${duplicate.name} already exists in this section; use list_bots` });
         }
+        const inheritedSoul = settings.soul?.trim();
+        const specialistSoul = inheritedSoul
+          ? `${inheritedSoul}\n\nSpecialist mandate:\n${instructions}`
+          : instructions;
         const created = store.createBot(
           {
             name,
             title: role,
             description: instructions,
+            soul: specialistSoul,
             modelSelection: selection,
             section: chief.section,
             ...(cwd !== undefined ? { cwd } : {}),
@@ -15332,6 +15360,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           { seedMessages: false },
         );
         const safeBot = store.patchBot(created.id, {
+          ...newBotSettingsPatch(created, settings, chief.section, cwd),
+          // The Chief supplies the specialist mandate while the configured
+          // company identity remains the common base for every ordinary bot.
+          title: role,
+          description: instructions,
+          soul: specialistSoul,
+          approvalMode: "ask",
           composio: false,
           connectorTools: {},
           autoApprove: false,

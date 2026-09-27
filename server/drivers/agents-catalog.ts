@@ -412,7 +412,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "create_bot",
     description:
-      "Create a specialist bot in your section. Chief of Staff only. Omit modelSelection to use the workspace default, or choose exact IDs from list_team_setup. Connected apps and automatic approvals start disabled. Assign work through delegate_bot. Maximum four new bots per turn.",
+      "Create a specialist bot in your section. Chief of Staff only. Omit modelSelection and cwd to inherit the configured workspace defaults, or choose an exact model plus supported reasoning effort from list_team_setup. Pass cwd as an empty string only when the person deliberately wants a private, low-context bot. Connected apps and automatic approvals start disabled. Assign work through delegate_bot. Maximum four new bots per turn.",
     inputSchema: {
       type: "object",
       properties: {
@@ -421,12 +421,13 @@ const toolDefinitions = (externalRuntime: boolean) => [
         instructions: { type: "string", description: "What this specialist is responsible for and how it should work." },
         modelSelection: { type: "object", additionalProperties: false, properties: {
           instanceId: { type: "string" }, model: { type: "string" },
-          effort: { type: "string" }, variant: { type: "string" },
+          effort: { type: "string", description: "Optional reasoning effort advertised for this engine by list_team_setup. Do not combine with variant." },
+          variant: { type: "string", description: "Optional model-specific variant. Do not combine with effort." },
         }, required: ["instanceId", "model"] },
         cwd: {
           type: "string",
           maxLength: 1024,
-          description: "Absolute path of the folder this specialist's tools read and write in (for example /Users/me/Projects/site). It must already exist. Leave it out for the specialist's private workspace.",
+          description: "Absolute path of the folder this specialist's tools read and write in. It must already exist. Omit it to inherit the configured workspace; use an empty string only for a deliberately private, low-context workspace.",
         },
       },
       required: ["name", "role", "instructions"],
@@ -439,7 +440,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   },
   {
     name: "propose_team_setup",
-    description: "Chief of Staff only: submit all requested specialist creation, profile/model configuration, Chief assignments, and authorized team moves in ONE combined plan. Use exact catalog engine/model IDs from list_team_setup. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; access is granted only to those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. If review is pending, the decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal." + PROPOSAL_OUTCOME,
+    description: "Chief of Staff only: submit all requested specialist creation, profile/model configuration, Chief assignments, and authorized team moves in ONE combined plan. New bots inherit configured workspace/model defaults when cwd or modelSelection is omitted; choose exact catalog IDs and a supported reasoning effort from list_team_setup when the work needs a deliberate override. An empty cwd explicitly requests a private, low-context workspace. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; access is granted only to those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. If review is pending, the decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal." + PROPOSAL_OUTCOME,
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {
@@ -455,10 +456,12 @@ const toolDefinitions = (externalRuntime: boolean) => [
               name: { type: "string", maxLength: 100 }, title: { type: "string", maxLength: 200 },
               chiefOfStaff: { type: "boolean", description: "Appoint or remove this team's Chief. At most one Chief per team: explicitly demote the current Chief in the same plan when replacing them. Does not grant access to other teams or change execution permissions." },
               description: { type: "string", maxLength: 4000 }, soul: { type: "string", description: "Standing instructions; required with name/title/modelSelection for every new bot." },
-              cwd: { type: "string", maxLength: 1024, description: "Create only: absolute path of the folder the new bot's tools read and write in. It must already exist. Leave it out for a private workspace." },
+              cwd: { type: "string", maxLength: 1024, description: "Create only: absolute existing folder. Omit to inherit the configured workspace; use an empty string only for a deliberately private, low-context workspace." },
               section: { type: "string", maxLength: 60, description: "Exact authorized existing team, or a team explicitly named in newTeams. Empty string means General." },
               modelSelection: { type: "object", additionalProperties: false, properties: {
-                instanceId: { type: "string" }, model: { type: "string" }, effort: { type: "string" }, variant: { type: "string" },
+                instanceId: { type: "string" }, model: { type: "string" },
+                effort: { type: "string", description: "Optional supported reasoning effort from list_team_setup. Do not combine with variant." },
+                variant: { type: "string", description: "Optional model-specific variant. Do not combine with effort." },
               }, required: ["instanceId", "model"] },
             } },
           }, required: ["action", "fields"],
